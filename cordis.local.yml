@@ -1,0 +1,6 @@
+# Local-dev overlay: absolute path (per first-plugin tutorial). For
+# `dsh plugin add`, the installed bundle's own cordis.patch.yml uses the
+# package name instead.
+- insert:
+    - id: cordis-review
+      name: '/home/maci/dsh-cordis-review/src/index.ts'

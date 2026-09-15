@@ -1,0 +1,12 @@
+# dsh-cordis-review as a profile bundle layer.
+#
+# `dsh plugin --profile <profile> add dsh-cordis-review` adds this package to
+# that profile's `dsh.profile.bundles`, and the boot then reads this file as
+# that layer's patch: one insert of the plugin row.
+#
+# Bundle layers compose once at boot, so activating the plugin needs a profile
+# restart. Do NOT also add this row by hand: `insert` appends without
+# deduplicating ids, so two rows would register the plugin twice.
+- insert:
+    - id: cordis-review
+      name: 'dsh-cordis-review'
