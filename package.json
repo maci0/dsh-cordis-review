@@ -1,6 +1,6 @@
 {
   "name": "dsh-cordis-review",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "CORDIS review slash command (/cordis-review) for DeepSeek Harness: review a codebase against arXiv:2608.25512 and apply the applicable fixes.",
