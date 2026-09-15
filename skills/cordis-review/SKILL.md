@@ -61,11 +61,12 @@ names (`ctx.effect`, `inject`, `ctx.get`, `apply`).
 
    The package root is the parent of `skills/cordis-review/` (this skill's
    directory). It prints `file:line: tag: message` for `mix-export`, `inject`,
-   `toplevel`, and `id`. Fix every line. JS/TS uses the TypeScript AST. Python,
-   Go, C, C++, Java, Rust use ast-grep when `ast-grep` is on PATH, else a
-   comment-stripped scan. Zig is always the stripped scan (no shipped grammar).
-   `leak` / `inverse` / `hmr` / `boundary` stay judgment. `cordis-check: clean`
-   still means walk the checklist.
+   `toplevel`, and `id` — every tag is one ast-grep query. Without `ast-grep`
+   on PATH each covered file warns on stderr and yields an LLM-fallback hit:
+   judge that file against the checklist yourself (that is the fallback, not a
+   second scanner). Zig has no ast-grep grammar, so `.zig` always takes that
+   path. `leak` / `inverse` / `hmr` / `boundary` stay judgment.
+   `cordis-check: clean` still means walk the checklist.
 5. **Audit, then fix.** Walk the checklist below. Each hit is a code change
    unless it is a documented outside-boundary emission. Grep callers of every
    function you touch; fix the shared primitive, not one call site.

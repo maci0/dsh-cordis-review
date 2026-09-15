@@ -152,7 +152,7 @@ test('python inject, comment ignored, declared keys clean', async () => {
         "inject = ['tools']\nctx.effect()\ndef apply(ctx):\n    ctx.tools.register()\n    # ctx.secrets.register()\n    ctx.jobs.run()\n",
     },
     async (root) => {
-      const hits = await check(root, { astGrep: false })
+      const hits = await check(root, { astGrep: true })
       assert.equal(hits.some((h) => h.tag === 'toplevel'), true)
       assert.equal(hits.some((h) => h.tag === 'inject' && h.message.includes('jobs')), true)
       assert.equal(hits.some((h) => h.message.includes('secrets')), false)
@@ -161,19 +161,68 @@ test('python inject, comment ignored, declared keys clean', async () => {
   )
 })
 
-test('polyglot inject via comment-stripped fallback', async () => {
+test('astGrep false: covered file warns and takes the LLM fallback', async () => {
+  await withTree(
+    {
+      'src/plugin.py': 'def apply(ctx):\n    ctx.jobs.run()\n',
+    },
+    async (root) => {
+      const warnings: string[] = []
+      const err = process.stderr.write
+      process.stderr.write = ((chunk: unknown) => {
+        warnings.push(String(chunk))
+        return true
+      }) as typeof process.stderr.write
+      try {
+        const hits = await check(root, { astGrep: false })
+        assert.equal(hits.length, 1)
+        assert.equal(hits[0]?.tag, 'inject')
+        assert.match(hits[0]?.message ?? '', /LLM fallback/)
+        assert.ok(warnings.some((w) => w.includes('warning')))
+      } finally {
+        process.stderr.write = err
+      }
+    },
+  )
+})
+
+test('astGrep true without the binary throws', async () => {
+  await withTree({ 'src/a.py': 'x = 1\n' }, async (root) => {
+    const path = process.env['PATH'] ?? ''
+    process.env['PATH'] = '/nonexistent'
+    try {
+      await assert.rejects(check(root, { astGrep: true }))
+    } finally {
+      process.env['PATH'] = path
+    }
+  })
+})
+
+test('zig has no ast-grep grammar: warning plus LLM fallback', async () => {
+  await withTree(
+    {
+      'src/a.zig': 'pub fn apply(ctx: Ctx) void { ctx.tools.register(); }\n',
+    },
+    async (root) => {
+      const hits = await check(root, { astGrep: true })
+      assert.equal(hits.length, 1)
+      assert.match(hits[0]?.message ?? '', /LLM fallback/)
+    },
+  )
+})
+
+test('polyglot inject via ast-grep kinds and patterns', async () => {
   const files: Record<string, string> = {
     'src/a.go': 'package p\nfunc apply(ctx Ctx) { ctx.Tools.Register() }\n',
     'src/a.rs': 'fn apply(ctx: Ctx) { ctx.tools.register(); }\n',
     'src/a.c': 'void apply(Ctx ctx) { ctx.tools.register(); }\n',
     'src/a.cpp': 'void apply(Ctx* ctx) { ctx->jobs.run(); }\n',
     'src/A.java': 'class A { void apply(Ctx ctx) { ctx.tools.register(); } }\n',
-    'src/a.zig': 'pub fn apply(ctx: Ctx) void { ctx.tools.register(); }\n',
   }
   await withTree(files, async (root) => {
-    const hits = await check(root, { astGrep: false })
+    const hits = await check(root, { astGrep: true })
     const langs = new Set(hits.filter((h) => h.tag === 'inject').map((h) => h.file.split('.').pop()))
-    for (const ext of ['go', 'rs', 'c', 'cpp', 'java', 'zig']) {
+    for (const ext of ['go', 'rs', 'c', 'cpp', 'java']) {
       assert.ok(langs.has(ext), ext)
     }
   })

@@ -8,7 +8,7 @@ Paper: [A Programming Paradigm for Spatiotemporal Composability](https://arxiv.o
 |---|---|---|
 | `/cordis-review` | `ctx.skills.registerProvider()` | The bundled `cordis-review` skill loads through the `skill` tool and appears as `/cordis-review` in the composer — DSH's command surface for user-invocable skills. The agent reviews the workspace against the paper and implements every applicable fix. |
 
-The skill body in `skills/cordis-review/SKILL.md` is the product. A closed-form checker (`src/check.ts`) prints the four tags that are grammar, not judgment (`mix-export`, `inject`, `toplevel`, `id`). JS/TS via the TypeScript AST; Python/Go/C/C++/Java/Rust via ast-grep when on PATH, else a comment-stripped scan; Zig always stripped. Inverse/leak/hmr/boundary stay with the agent.
+The skill body in `skills/cordis-review/SKILL.md` is the product. A closed-form checker (`src/check.ts`) prints the four tags that are grammar, not judgment (`mix-export`, `inject`, `toplevel`, `id`) — every tag is one ast-grep query. Without `ast-grep` on PATH each covered file warns on stderr and yields an LLM-fallback hit for the review agent to judge; Zig (no ast-grep grammar) always takes that path. Inverse/leak/hmr/boundary stay with the agent.
 
 ## Install
 
@@ -87,7 +87,7 @@ and delete the `id: cordis-review` row from `~/.dsh/profiles/<profile>/cordis.pa
 
 ## Checker
 
-JS/TS via the TypeScript AST. Python, Go, C, C++, Java, Rust via `ast-grep` when it is on PATH, else a comment-stripped scan. Zig is always the stripped scan (ast-grep has no Zig grammar). Inverse/leak/hmr/boundary stay with the agent.
+One engine: every tag is an ast-grep query over JS/TS, Python, Go, C, C++, Java, Rust, and YAML. Without `ast-grep` on PATH each covered file warns on stderr and yields an LLM-fallback hit for the review agent to judge. Zig has no ast-grep grammar and always takes that path. Inverse/leak/hmr/boundary stay with the agent.
 
 ```sh
 npm run check            # this checkout
