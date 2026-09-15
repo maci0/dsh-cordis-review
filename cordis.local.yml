@@ -1,6 +1,6 @@
-# Local-dev overlay: absolute path (per first-plugin tutorial). For
-# `dsh plugin add`, the installed bundle's own cordis.patch.yml uses the
-# package name instead.
+# Local-dev overlay: absolute path (per first-plugin tutorial). For the
+# live-reload install, paste the package-name row from cordis.patch.yml
+# into ~/.dsh/profiles/<profile>/cordis.patch.yml instead.
 - insert:
     - id: cordis-review
       name: '/home/maci/dsh-cordis-review/src/index.ts'

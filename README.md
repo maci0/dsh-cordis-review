@@ -12,16 +12,41 @@ No settings card, no always-on prompt, no extra tools. The skill body in `skills
 
 ## Install
 
+Live-reload install: keep the package as a **plain dependency** (no `dsh.bundle`) and put the Loader row in the profile's own `cordis.patch.yml`. That file is what `patchReload: live` watches. `dsh.profile.bundles` is frozen at boot — do not put this package there.
+
 ```sh
-# straight from GitHub
-dsh plugin --profile web add github:maci0/dsh-cordis-review
-# or from a local checkout
 dsh plugin --profile web add /path/to/dsh-cordis-review
+# pnpm will warn "declares no dsh.bundle — installed as a plain dependency". That is the point.
 ```
 
-The package declares `dsh.bundle`, so `dsh plugin` adds it to the profile's `dsh.profile.bundles`, and the boot reads the plugin row from this package's own `cordis.patch.yml`. **Restart the profile**: a bundle list is composed at boot, so a running profile does not pick it up from a live patch reload.
+Then paste this into `~/.dsh/profiles/web/cordis.patch.yml` (or merge into an existing `- insert:` list):
 
-Local overlay for development (no install; absolute path required):
+```yaml
+- insert:
+    - id: cordis-review
+      name: dsh-cordis-review
+```
+
+Saving that file remounts the plugin. No profile restart.
+
+A second `add` of the same spec is a no-op. Uninstall with the **package name**, not the git specifier:
+
+```sh
+dsh plugin --profile web remove dsh-cordis-review
+```
+
+`remove github:…` is `pnpm remove github:…`, and pnpm looks up the argument as a dependency key — it is not there, so it fails with `ERR_PNPM_CANNOT_REMOVE_MISSING_DEPS` even though the plugin is installed. The `allowBuilds` hint that follows is leftover CLI copy for a failed git `add`; ignore it. Then delete the `id: cordis-review` row from the profile patch; saving unmounts it.
+
+Skill-only (no plugin row): DSH already watches `~/.dsh/skills`.
+
+```sh
+mkdir -p ~/.dsh/skills
+ln -s /path/to/dsh-cordis-review/skills/cordis-review ~/.dsh/skills/cordis-review
+```
+
+Edits to the skill body load on the next `/cordis-review`. A user-level skill of the same name outranks a plugin-provided copy (rank 400 vs 600).
+
+Local overlay for a one-shot boot (absolute path required):
 
 ```sh
 pnpm dsh web --patch /path/to/dsh-cordis-review/cordis.local.yml
@@ -29,7 +54,7 @@ pnpm dsh web --patch /path/to/dsh-cordis-review/cordis.local.yml
 
 ### Verify
 
-After a restart of the profile and a **page refresh** of the Web client:
+After the profile patch save (and a **page refresh** of the Web client the first time):
 
 - `/cordis-review` is in the `/` menu;
 - invoking it injects the CORDIS review instructions and the agent starts the audit.
@@ -55,7 +80,7 @@ None. The Loader row has no `config`.
 dsh plugin --profile web remove dsh-cordis-review
 ```
 
-Restart the profile after removing.
+and delete the `id: cordis-review` row from `~/.dsh/profiles/<profile>/cordis.patch.yml`. Saving unmounts it.
 
 ## Develop
 
@@ -64,6 +89,8 @@ cd ~/dsh-cordis-review
 npm test
 npx tsc -p tsconfig.json
 ```
+
+Host source edits remount when the profile's `id: hmr` row is enabled with this checkout in `config.root`. Browser chrome is none.
 
 ## License
 
