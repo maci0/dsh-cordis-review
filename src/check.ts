@@ -46,6 +46,8 @@ const SKIP_DIR = new Set([
   '__pycache__',
   '.venv',
   'zig-out',
+  'zig-pkg',
+  '.zig-cache',
   'target',
   'vendor',
   'build',
