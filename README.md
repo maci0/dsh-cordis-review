@@ -8,7 +8,7 @@ Paper: [A Programming Paradigm for Spatiotemporal Composability](https://arxiv.o
 |---|---|---|
 | `/cordis-review` | `ctx.skills.registerProvider()` | The bundled `cordis-review` skill loads through the `skill` tool and appears as `/cordis-review` in the composer — DSH's command surface for user-invocable skills. The agent reviews the workspace against the paper and implements every applicable fix. |
 
-No settings card, no always-on prompt, no extra tools. The skill body in `skills/cordis-review/SKILL.md` is the whole product.
+The skill body in `skills/cordis-review/SKILL.md` is the product. A closed-form checker (`src/check.ts`) prints the four tags that are grammar, not judgment (`mix-export`, `inject`, `toplevel`, `id`). JS/TS via the TypeScript AST; Python/Go/C/C++/Java/Rust via ast-grep when on PATH, else a comment-stripped scan; Zig always stripped. Inverse/leak/hmr/boundary stay with the agent.
 
 ## Install
 
@@ -63,7 +63,10 @@ After the profile patch save (and a **page refresh** of the Web client the first
 
 The skill tells the agent to:
 
-1. Read [arXiv:2608.25512](https://arxiv.org/abs/2608.25512).
+1. Use its own bundled checklist as the rubric — `SKILL.md` ships the
+   operationalized rules, so the review never depends on a fetch. The abs page
+   `arxiv.org/abs/2608.25512` works if the abstract is wanted; the PDF is not
+   decodable here and no HTML rendering exists for this submission.
 2. Map the workspace onto CORDIS (context, revertible effects, reactive coeffects, loader/fibers).
 3. Audit against temporal composability (every mutation has an inverse the runtime holds), spatial composability (dependencies declared and reactively managed), and the context paradigm (no leaked `ctx`).
 4. **Implement** every applicable fix. Report-only is failure. Hits outside the system boundary (§6.1) are skipped with a one-line reason.
@@ -82,12 +85,24 @@ dsh plugin --profile web remove dsh-cordis-review
 
 and delete the `id: cordis-review` row from `~/.dsh/profiles/<profile>/cordis.patch.yml`. Saving unmounts it.
 
+## Checker
+
+JS/TS via the TypeScript AST. Python, Go, C, C++, Java, Rust via `ast-grep` when it is on PATH, else a comment-stripped scan. Zig is always the stripped scan (ast-grep has no Zig grammar). Inverse/leak/hmr/boundary stay with the agent.
+
+```sh
+npm run check            # this checkout
+npm run check -- /path   # another tree
+```
+
+Prints `file:line: tag: message` or `cordis-check: clean`. Exit 1 on hits.
+
 ## Develop
 
 ```sh
 cd ~/dsh-cordis-review
 npm test
 npx tsc -p tsconfig.json
+npm run check
 ```
 
 Host source edits remount when the profile's `id: hmr` row is enabled with this checkout in `config.root`. Browser chrome is none.

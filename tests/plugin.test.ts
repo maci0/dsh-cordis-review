@@ -6,25 +6,37 @@ import type { HostContext, SkillProviderLike } from '../src/host.ts'
 interface Captured {
   readonly providers: SkillProviderLike[]
   readonly injects: string[][]
+  dispose: () => void
 }
 
 function createHost(): { ctx: HostContext; captured: Captured } {
-  const captured: Captured = { providers: [], injects: [] }
+  const captured: Captured = { providers: [], injects: [], dispose: () => {} }
 
   const ctx: HostContext = {
     inject: (dependencies, callback) => {
       captured.injects.push([...dependencies])
+      const nested: Array<() => void> = []
       const scope: HostContext = {
         ...ctx,
         skills: {
           registerProvider: (create) => {
-            captured.providers.push(create())
-            return () => {}
+            const provider = create()
+            captured.providers.push(provider)
+            const dispose = (): void => {
+              const index = captured.providers.indexOf(provider)
+              if (index >= 0) captured.providers.splice(index, 1)
+            }
+            nested.push(dispose)
+            return dispose
           },
         },
       }
       callback(scope)
-      return () => {}
+      const dispose = (): void => {
+        for (const inner of nested.reverse()) inner()
+      }
+      captured.dispose = dispose
+      return dispose
     },
   }
 
@@ -60,4 +72,13 @@ test('apply registers one skills provider when skills is injected', async () => 
   assert.match(loaded.content, /implement every applicable fix/)
   assert.match(loaded.content, /Temporal composability/)
   assert.match(loaded.content, /Spatial composability/)
+  assert.match(loaded.content, /Closed-form pass/)
+})
+
+test('dispose of inject removes the skills provider', () => {
+  const { ctx, captured } = createHost()
+  apply(ctx)
+  assert.equal(captured.providers.length, 1)
+  captured.dispose()
+  assert.equal(captured.providers.length, 0)
 })

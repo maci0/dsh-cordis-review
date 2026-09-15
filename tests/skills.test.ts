@@ -52,6 +52,23 @@ test('bundled skill is discoverable and user-invocable', async () => {
   assert.deepEqual(listed[0]?.invocation, { modelInvocable: true, userInvocable: true })
 })
 
+test('bundled skill carries its own rubric and names the one fetchable URL', async () => {
+  const skills = await discoverSkills(skillsDir)
+  const skill = skills[0]
+  assert.ok(skill)
+  // The rubric must be present locally: it is the source of rules.
+  assert.match(skill.content, /## Checklist/)
+  assert.match(skill.content, /## What the paper requires/)
+  const protocol = skill.content.slice(
+    skill.content.indexOf('## Protocol'),
+    skill.content.indexOf('## What the paper requires'),
+  )
+  // If a URL is offered, it must be the abs page — /pdf is rejected by the
+  // harness and /html 404s for this submission.
+  assert.match(protocol, /https:\/\/arxiv\.org\/abs\/2608\.25512/)
+  assert.doesNotMatch(protocol, /arxiv\.org\/(pdf|html)\//)
+})
+
 test('discoverSkills skips a broken sibling and keeps the rest', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-cordis-review-'))
   try {

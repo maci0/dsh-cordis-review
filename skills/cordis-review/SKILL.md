@@ -19,8 +19,18 @@ and **implement every applicable fix**. Report-only is failure. Skip a finding
 only when the paper's own system-boundary argument says the effect cannot be
 tracked.
 
-Paper: https://arxiv.org/abs/2608.25512
-PDF: https://arxiv.org/pdf/2608.25512
+**This file is the checklist — start here.** It is the operational form of
+the paper and is sufficient to review and patch; the agent is not required to
+fetch anything before auditing.
+
+Paper fetch, if you want the abstract and exact metadata: the **abs page only**
+— <https://arxiv.org/abs/2608.25512> (HTTP 200). Do **not** try the PDF
+(`/pdf/2608.25512`: this harness rejects `application/pdf`) or an HTML
+rendering (`/html/2608.25512v1` is 404 — no HTML is published for this
+submission). The abstract is not the checklist: rules come from this file, not
+from a fetched page, and never from memory. The `§` numbers below are cited
+from the paper's section structure and were verified against it; do not
+re-derive or second-guess them mid-review.
 
 If the workspace is DeepSeek Harness or a `dsh-*` plugin, also obey that
 repo's Cordis conventions (`AGENTS.md`, `docs/cordis-primer.md`,
@@ -31,18 +41,37 @@ names (`ctx.effect`, `inject`, `ctx.get`, `apply`).
 
 1. **Scope.** Default: the current workspace. A `/cordis-review <path>`
    argument, if present, is the root. Do not wander into unrelated checkouts.
-2. **Read the paper.** `web_fetch` the abs page or PDF text if you do not
-   already have it this session. Do not invent rules.
+2. **Get the rules.** Read this file's **Checklist** and **What the paper
+   requires** sections — that is the complete rubric, already loaded. If you
+   need the paper's abstract or exact metadata, `web_fetch` the abs page
+   `https://arxiv.org/abs/2608.25512` (the only URL that works; the PDF is
+   rejected and there is no HTML rendering). In DSH / `dsh-*` plugin
+   workspaces, also read that repo's `AGENTS.md` and `docs/cordis-primer.md`;
+   those are the local naming and convention source of truth.
 3. **Map the runtime.** Find the context object, effect/coeffect primitives,
    component/plugin entrypoints (`apply` / `inject` / `Service`), and the
    loader. In DSH/Cordis that is `ctx`, `ctx.effect` / `ctx.on` / `ctx.set`,
    `inject`, fibers, and the Loader.
-4. **Audit, then fix.** Walk the checklist below. Each hit is a code change
+4. **Closed-form pass.** Run this plugin's checker before walking the rest of
+   the checklist. From this package root:
+
+   ```
+   node --experimental-strip-types --disable-warning=ExperimentalWarning src/cli.ts [scope]
+   ```
+
+   The package root is the parent of `skills/cordis-review/` (this skill's
+   directory). It prints `file:line: tag: message` for `mix-export`, `inject`,
+   `toplevel`, and `id`. Fix every line. JS/TS uses the TypeScript AST. Python,
+   Go, C, C++, Java, Rust use ast-grep when `ast-grep` is on PATH, else a
+   comment-stripped scan. Zig is always the stripped scan (no shipped grammar).
+   `leak` / `inverse` / `hmr` / `boundary` stay judgment. `cordis-check: clean`
+   still means walk the checklist.
+5. **Audit, then fix.** Walk the checklist below. Each hit is a code change
    unless it is a documented outside-boundary emission. Grep callers of every
    function you touch; fix the shared primitive, not one call site.
-5. **Verify.** One HMR/dispose test per registration you add or repair: dispose
+6. **Verify.** One HMR/dispose test per registration you add or repair: dispose
    the contributing fiber, assert the contribution is gone. Run the smallest
-   existing test command that covers the files you changed.
+   existing test command that covers the files you changed. Re-run the checker.
 
 ## What the paper requires
 
@@ -65,7 +94,9 @@ global leaks effects out of the owner's lifecycle and coeffects out of its
 
 The runtime does **not** prove that an inverse actually reverts, or that
 operations published at one key commute. Those are author obligations
-(§5.1.1, §6.1). This review discharges them in code.
+(§5.1.1 effect tracking — "Effect tracking" is the only context-transformation
+primitive, and the runtime does not check the inverse witness; §6.1 "System
+Boundary"). This review discharges them in code.
 
 ## Checklist
 
