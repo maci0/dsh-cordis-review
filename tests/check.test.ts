@@ -225,11 +225,14 @@ test('polyglot inject via ast-grep kinds and patterns', async () => {
     'src/a.swift': 'func apply(ctx: Ctx) { ctx.jobs.run() }\n',
     'src/a.scala': 'def apply(ctx: Ctx) = ctx.jobs.run()\n',
     'src/a.dart': 'void apply(Ctx ctx) { ctx.jobs.run(); }\n',
+    'src/a.kt': 'fun apply(ctx: Ctx) { ctx.jobs.run() }\n',
+    'src/a.rb': 'def apply(ctx); ctx.jobs.run; end\n',
+    'src/a.php': '<?php function apply($ctx) { $ctx->jobs->run(); }\n',
   }
   await withTree(files, async (root) => {
     const hits = await check(root, { astGrep: true })
     const langs = new Set(hits.filter((h) => h.tag === 'inject').map((h) => h.file.split('.').pop()))
-    for (const ext of ['go', 'rs', 'c', 'cpp', 'java', 'lua', 'swift', 'scala', 'dart']) {
+    for (const ext of ['go', 'rs', 'c', 'cpp', 'java', 'lua', 'swift', 'scala', 'dart', 'kt', 'rb', 'php']) {
       assert.ok(langs.has(ext), ext)
     }
   })

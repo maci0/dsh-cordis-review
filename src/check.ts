@@ -128,7 +128,7 @@ function isSkippedDir(part: string): boolean {
 
 const SCRIPT = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'])
 const YAML = new Set(['.yml', '.yaml'])
-const POLYGLOT = new Set(['.py', '.pyi', '.go', '.c', '.h', '.cc', '.cpp', '.cxx', '.hpp', '.hh', '.java', '.rs', '.lua', '.swift', '.scala', '.dart'])
+const POLYGLOT = new Set(['.py', '.pyi', '.go', '.c', '.h', '.cc', '.cpp', '.cxx', '.hpp', '.hh', '.java', '.rs', '.lua', '.swift', '.scala', '.dart', '.kt', '.kts', '.rb', '.php'])
 /** Extensions whose text is read before scanning (only to skip browser bundles). */
 const SKIPPABLE = new Set(['.js', '.jsx', '.mjs', '.cjs'])
 
@@ -176,7 +176,7 @@ const NONTS_KEY = /^[A-Za-z][A-Za-z0-9]*$/
  * dereference. A service is a namespace called into (`ctx.jobs.run()`); a
  * bare `ctx.snapshot()` is a method call, not a coeffect.
  */
-const CONTINUED = /(?:^|[^\w])(ctx|scope|hostCtx|context)\s*(?:\.|->)\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\.|->)/
+const CONTINUED = /(?:^|[^\w$])\$?(ctx|scope|hostCtx|context)\s*(?:\.|->)\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\.|->)/
 const CONTINUED_G = new RegExp(CONTINUED.source, 'g')
 function continuedAccess(line: string, alias: string, key: string): boolean {
   CONTINUED_G.lastIndex = 0
@@ -201,7 +201,7 @@ interface SgRule {
 }
 
 /** Prune non-`ctx` matches inside the engine: member/call/get/inject texts start at the receiver. */
-const CTX_HEAD = '^(ctx|scope|hostCtx|context)\\b'
+const CTX_HEAD = '^\\$?(ctx|scope|hostCtx|context)\\b'
 
 /**
  * Single multi-language rule document. Rule order is load-bearing only for
@@ -248,6 +248,9 @@ function sgRulesDoc(): string {
     { id: 'm-swift', language: 'swift', pattern: '$C.$K', regex: CTX_HEAD },
     { id: 'm-scala', language: 'scala', pattern: '$C.$K', regex: CTX_HEAD },
     { id: 'm-dart', language: 'dart', kind: 'member_expression', regex: CTX_HEAD },
+    { id: 'm-kotlin', language: 'kotlin', kind: 'navigation_expression', regex: CTX_HEAD },
+    { id: 'm-ruby', language: 'ruby', kind: 'call', regex: CTX_HEAD },
+    { id: 'm-php', language: 'php', pattern: '$C->$K', regex: CTX_HEAD },
     // toplevel-shaped calls at depth 0 via inside-negation.
     // ast-grep `inside` does not see through fn bodies in some grammars
     // (rust `function_item`, go closures), so toplevel also keeps the old
@@ -265,6 +268,9 @@ function sgRulesDoc(): string {
     { id: 't-swift', language: 'swift', kind: 'call_expression', regex: CTX_HEAD, notInside: ['function_declaration'] },
     { id: 't-scala', language: 'scala', kind: 'call_expression', regex: CTX_HEAD, notInside: ['function_definition'] },
     { id: 't-dart', language: 'dart', kind: 'call_expression', regex: CTX_HEAD, notInside: ['function_declaration'] },
+    { id: 't-kotlin', language: 'kotlin', kind: 'call_expression', regex: CTX_HEAD, notInside: ['function_declaration'] },
+    { id: 't-ruby', language: 'ruby', kind: 'call', regex: CTX_HEAD, notInside: ['method'] },
+    { id: 't-php', language: 'php', pattern: '$C->$M($$$ARGS)', regex: CTX_HEAD, notInside: ['function_definition'] },
     // bare `register(` — kept parallel to the old per-file query; C/C++ use
     // kind+regex because `register($$$ARGS)` does not parse there
     { id: 't-bare-py', language: 'python', pattern: 'register($$$ARGS)', notInside: ['function_definition', 'lambda'] },
@@ -280,6 +286,9 @@ function sgRulesDoc(): string {
     { id: 't-bare-swift', language: 'swift', pattern: 'register($$$ARGS)', notInside: ['function_declaration'] },
     { id: 't-bare-scala', language: 'scala', pattern: 'register($$$ARGS)', notInside: ['function_definition'] },
     { id: 't-bare-dart', language: 'dart', kind: 'call_expression', textPrefix: 'register', notInside: ['function_declaration'] },
+    { id: 't-bare-kotlin', language: 'kotlin', pattern: 'register($$$ARGS)', notInside: ['function_declaration'] },
+    { id: 't-bare-ruby', language: 'ruby', pattern: 'register($$$ARGS)', notInside: ['method'] },
+    { id: 't-bare-php', language: 'php', pattern: 'register($$$ARGS)', notInside: ['function_definition'] },
     // ctx.get / ctx.inject widening (data for the inject pass)
     { id: 'u-get-ts', language: 'typescript', pattern: '$C.get($$$ARGS)', regex: CTX_HEAD },
     { id: 'u-get-js', language: 'javascript', pattern: '$C.get($$$ARGS)', regex: CTX_HEAD },
@@ -487,7 +496,7 @@ function injectMessage(key: string): string {
 }
 
 function memberKeyFromText(text: string): { alias: string; key: string } | undefined {
-  const match = /(?:^|[^\w])(ctx|scope|hostCtx|context)\s*(?:\.|->)\s*([A-Za-z_][A-Za-z0-9_]*)/.exec(` ${text}`)
+  const match = /(?:^|[^\w$])\$?(ctx|scope|hostCtx|context)\s*(?:\.|->)\s*([A-Za-z_][A-Za-z0-9_]*)/.exec(` ${text}`)
   if (match?.[1] === undefined || match[2] === undefined) return undefined
   return { alias: match[1], key: match[2] }
 }
@@ -615,7 +624,7 @@ function sgScript(rel: string, byRule: ReadonlyMap<string, readonly SgHit[]>, te
 
 async function sgPolyglot(rel: string, byRule: ReadonlyMap<string, readonly SgHit[]>, abs: string): Promise<Finding[]> {
   const text = await readFile(abs, 'utf8')
-  return sgMembersAndToplevel(rel, byRule, text, true, 'm-py', 'm-go', 'm-c', 'm-cpp', 'm-java', 'm-rust', 'm-lua', 'm-swift', 'm-scala', 'm-dart', 't-py', 't-go', 't-rs', 't-java', 't-c', 't-cpp', 't-lua', 't-swift', 't-scala', 't-dart')
+  return sgMembersAndToplevel(rel, byRule, text, true, 'm-py', 'm-go', 'm-c', 'm-cpp', 'm-java', 'm-rust', 'm-lua', 'm-swift', 'm-scala', 'm-dart', 'm-kotlin', 'm-ruby', 'm-php', 't-py', 't-go', 't-rs', 't-java', 't-c', 't-cpp', 't-lua', 't-swift', 't-scala', 't-dart', 't-kotlin', 't-ruby', 't-php')
 }
 
 /** Shared inject + toplevel pass over one scan's member/call matches. */
@@ -669,12 +678,12 @@ function sgMembersAndToplevel(
       const bareCall = ruleId.startsWith('t-bare-') ? /^register/.exec(text.trim()) !== null : false
       // Recover receiver+method from one match (C++ `ctx->jobs.run` parses
       // with C=`ctx->jobs`; kind-only rules carry no metavariables at all).
-      const call = /(?:^|[^\w])(ctx|scope|hostCtx|context)\s*(?:\.|->)\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(` ${text}`)
+      const call = /(?:^|[^\w$])\$?(ctx|scope|hostCtx|context)\s*(?:\.|->)\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(` ${text}`)
       const bare = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(text)
       // Kind-only matches (go/rust/java/c/cpp) have no receiver info: take the
       // head member (`ctx.jobs.run()` → `ctx.jobs`) and let the depth pass below
       // decide toplevel-ness; the inject pass already judged the key.
-      const dotted = /^([A-Za-z_][A-Za-z0-9_]*)\s*(?:\.|->)\s*([A-Za-z_][A-Za-z0-9_]*)/.exec(text.trim())
+      const dotted = /^\$?([A-Za-z_][A-Za-z0-9_]*)\s*(?:\.|->)\s*([A-Za-z_][A-Za-z0-9_]*)/.exec(text.trim())
       const recv = call?.[1] ?? ''
       const method = call?.[2] ?? (bareCall ? 'register' : (bare?.[1] ?? dotted?.[2] ?? ''))
       if (!IDENT.test(method)) continue
