@@ -37,21 +37,95 @@ export interface CheckOptions {
 }
 
 const SKIP_DIR = new Set([
-  'node_modules',
+  // VCS
   '.git',
-  'dist',
-  'coverage',
-  '.dsh-module-fallback',
-  'outputs',
-  '__pycache__',
+  '.hg',
+  '.svn',
+  '.bzr',
+  // JS/TS: packages, caches, framework output
+  'node_modules',
+  'bower_components',
+  '.npm',
+  '.yarn',
+  '.pnpm-store',
+  '.parcel-cache',
+  '.vite',
+  '.next',
+  '.nuxt',
+  '.astro',
+  '.svelte-kit',
+  '.turbo',
+  '.output',
+  '.vercel',
+  '.serverless',
+  '.aws-sam',
+  'out',
+  // Python: venvs, caches, test/build output
+  'venv',
+  'env',
+  '.env',
   '.venv',
+  '__pycache__',
+  '.tox',
+  '.nox',
+  '.mypy_cache',
+  '.ruff_cache',
+  '.pytest_cache',
+  '.hypothesis',
+  '.eggs',
+  'htmlcov',
+  '.ipynb_checkpoints',
+  '.pixi',
+  // Rust / Go / Zig / C++
+  'target',
+  'vendor',
   'zig-out',
   'zig-pkg',
   '.zig-cache',
-  'target',
-  'vendor',
+  // .NET / JVM / Apple
+  'bin',
+  'obj',
+  'TestResults',
+  'packages',
+  '.gradle',
+  '.m2',
+  'DerivedData',
+  'Pods',
+  'Carthage',
+  // Dart / Elixir / Haskell
+  '.dart_tool',
+  '_build',
+  'deps',
+  '.elixir_ls',
+  '.stack-work',
+  'dist-newstyle',
+  // Ruby
+  '.bundle',
+  // Terraform
+  '.terraform',
+  '.terragrunt-cache',
+  // IDE / generic generated
+  '.idea',
+  '.vscode',
+  '.vs',
+  '.cache',
+  'dist',
   'build',
+  'coverage',
+  'logs',
+  'tmp',
+  '.tmp',
+  '.dsh-module-fallback',
+  'outputs',
 ])
+
+/** Generated dirs with a variable prefix/suffix the exact set cannot name. */
+function isSkippedDir(part: string): boolean {
+  if (SKIP_DIR.has(part)) return true
+  if (part.endsWith('.egg-info')) return true // pip build output: <pkg>.egg-info
+  if (part.startsWith('cmake-build-')) return true // CLion CMake output
+  return false
+}
 
 const SCRIPT = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'])
 const YAML = new Set(['.yml', '.yaml'])
@@ -89,6 +163,24 @@ const CTX_INTRINSICS = new Set([
 const CTX_ALIAS = /^(ctx|scope|hostCtx|context)$/
 const TOPLEVEL_VERB = /^(effect|on|set|plugin|register)/
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/
+/**
+ * Service-key shape, enforced only for non-TS languages (the `nonTs` flag).
+ * Snake_case or `_`-leading members (`_undos`, `do_thing`) are locals in
+ * every grammar the checker covers: service keys carry no underscores.
+ * TS/JS keep the old behavior (Cordis TS keys are host-defined; narrowing
+ * there would trade false negatives for fewer false positives).
+ */
+const NONTS_KEY = /^[A-Za-z][A-Za-z0-9]*$/
+
+/**
+ * True when `line` continues `alias.KEY` with another `.` / `->`
+ * dereference. A service is a namespace called into (`ctx.jobs.run()`); a
+ * bare `ctx.snapshot()` is a method call, not a coeffect.
+ * alias/key are IDENT-constrained, so interpolation is regex-safe.
+ */
+function continuedAccess(line: string, alias: string, key: string): boolean {
+  return new RegExp(`(?:^|[^\\w])${alias}\\s*(?:\\.|->)\\s*${key}\\s*(?:\\.|->)`).test(` ${line}`)
+}
 
 /** One ast-grep `scan` rule: one engine spawn covers every file of these languages. */
 interface SgRule {
@@ -291,7 +383,7 @@ async function listFiles(root: string): Promise<string[]> {
     if (!entry.isFile()) continue
     const abs = join(entry.parentPath, entry.name)
     const rel = relative(root, abs).split('\\').join('/')
-    if (rel.split('/').some((part) => SKIP_DIR.has(part))) continue
+    if (rel.split('/').some(isSkippedDir)) continue
     out.push(abs)
   }
   return out
@@ -453,12 +545,12 @@ function sgScript(rel: string, hits: readonly SgHit[], text: string): Finding[] 
     }
   }
 
-  return findings.concat(sgMembersAndToplevel(rel, hits, text, 'm-ts', 'm-js', 'm-tsx', 't-ts', 't-js', 't-tsx'))
+  return findings.concat(sgMembersAndToplevel(rel, hits, text, false, 'm-ts', 'm-js', 'm-tsx', 't-ts', 't-js', 't-tsx'))
 }
 
 async function sgPolyglot(rel: string, hits: readonly SgHit[], abs: string): Promise<Finding[]> {
   const text = await readFile(abs, 'utf8')
-  return sgMembersAndToplevel(rel, hits, text, 'm-py', 'm-go', 'm-c', 'm-cpp', 'm-java', 'm-rust', 't-py')
+  return sgMembersAndToplevel(rel, hits, text, true, 'm-py', 'm-go', 'm-c', 'm-cpp', 'm-java', 'm-rust', 't-py')
 }
 
 /** Shared inject + toplevel pass over one scan's member/call matches. */
@@ -466,6 +558,7 @@ function sgMembersAndToplevel(
   rel: string,
   hits: readonly SgHit[],
   text: string,
+  nonTs: boolean,
   ...ids: readonly string[]
 ): Finding[] {
   const declared = declaredKeys(hits)
@@ -473,11 +566,23 @@ function sgMembersAndToplevel(
   const reads = getReads(hits)
   const findings: Finding[] = []
   const seen = new Set<string>()
+  const srcLines = text.split(/\r?\n/)
 
   for (const hit of hitsFor(hits, ...ids.filter((id) => id.startsWith('m-')))) {
     const parsed = memberKeyFromText(hit.text ?? '')
     if (parsed === undefined || !CTX_ALIAS.test(parsed.alias)) continue
     if (!IDENT.test(parsed.key) || CTX_INTRINSICS.has(parsed.key) || declared.has(parsed.key)) continue
+    if (nonTs && !NONTS_KEY.test(parsed.key)) continue
+    // A bare call is a host method, not a coeffect: only `ctx.KEY.…`
+    // survived (covers `ctx.jobs.run()`, Go `ctx.Tools.Register()`), and
+    // the call itself never reads (`ctx.tools.register()` is the service
+    // `tools` providing `register`, already caught at its member). Kind-only
+    // matches (java `field_access`) carry no trailing text, so fall back to
+    // the source line for the continuation check.
+    const contText = continuedAccess(hit.text ?? '', parsed.alias, parsed.key)
+      ? hit.text ?? ''
+      : (srcLines[lineOf(hit) - 1] ?? '')
+    if (nonTs && !continuedAccess(contText, parsed.alias, parsed.key)) continue
     if (reads.has(`${lineOf(hit)}:${parsed.key}`)) continue
     if (widened(widens, lineOf(hit), parsed.alias, parsed.key)) continue
     const id = `${lineOf(hit)}:${parsed.key}`

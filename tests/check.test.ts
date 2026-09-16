@@ -228,6 +228,35 @@ test('polyglot inject via ast-grep kinds and patterns', async () => {
   })
 })
 
+test('non-TS: bare calls and underscore members are locals', async () => {
+  const files: Record<string, string> = {
+    'src/a.py': 'def apply(ctx):\n    ctx.snapshot()\n    ctx._undos.append(1)\n    ctx.do_thing()\n    ctx.jobs.run()\n',
+    'src/a.c': 'void apply(Ctx ctx) {\n    ctx.snapshot();\n    ctx.jobs.run();\n}\n',
+    'src/a.cpp': 'void apply(Ctx* ctx) {\n    ctx->snapshot();\n    ctx->jobs->run();\n}\n',
+    'src/a.rs': 'fn apply(ctx: Ctx) {\n    ctx.snapshot();\n    ctx.jobs.run();\n}\n',
+    'src/A.java': 'class A { void apply(Ctx ctx) { ctx.snapshot(); ctx.jobs.run(); } }\n',
+  }
+  await withTree(files, async (root) => {
+    const hits = await check(root, { astGrep: true })
+    assert.equal(hits.filter((h) => h.tag === 'inject').length, 5)
+    assert.ok(hits.every((h) => h.message.includes('jobs')))
+  })
+})
+
+test('skips generated and vendored dirs', async () => {
+  const files: Record<string, string> = {
+    'src/real.ts': 'export function apply(ctx) {\n  ctx.effect(() => () => {})\n}\n',
+    'node_modules/pkg/viol.ts': 'export default class S {}\nexport function apply() {}\n',
+    '.next/cache/viol.ts': 'export default class S {}\nexport function apply() {}\n',
+    '.venv/viol.py': 'ctx.effect()\n',
+    'target/viol.rs': 'fn f(ctx: Ctx) { ctx.jobs.run(); }\n',
+  }
+  await withTree(files, async (root) => {
+    const hits = await check(root, { astGrep: true })
+    assert.deepEqual(hits, [])
+  })
+})
+
 test('this plugin is clean', async () => {
   const { dirname } = await import('node:path')
   const { fileURLToPath } = await import('node:url')
