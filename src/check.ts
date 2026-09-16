@@ -216,8 +216,15 @@ const CTX_HEAD = '^\\$?(ctx|scope|hostCtx|context)\\b'
  * readability — matches carry ruleId, so evaluation order never changes output.
  * Keep the member/call/toplevel triple together per family when adding rules.
  */
-function sgRulesDoc(withZig = false): string {
-  const rules: SgRule[] = [
+/** Rule doc for one language only; undefined when no rule serves it. */
+function sgRulesDocFor(withZig: boolean, lang: string): string | undefined {
+  const rules = sgRules(withZig).filter((rule) => rule.language === lang)
+  if (rules.length === 0) return undefined
+  return rules.map((rule) => sgRuleYaml(rule)).join('---\n')
+}
+
+function sgRules(withZig: boolean): SgRule[] {
+  return [
     // yaml ids
     { id: 'u-id', language: 'yaml', pattern: 'id: $ID' },
     // JS/TS mix-export
@@ -324,7 +331,6 @@ function sgRulesDoc(withZig = false): string {
     { id: 'u-inject-tsx', language: 'tsx', pattern: '$C.inject($$$ARGS)', regex: CTX_HEAD },
     { id: 'u-inject-py', language: 'python', pattern: '$C.inject($$$ARGS)', regex: CTX_HEAD },
   ]
-  return rules.map((rule) => sgRuleYaml(rule)).join('---\n')
 }
 
 function sgRuleYaml(rule: SgRule): string {
@@ -493,23 +499,103 @@ function sgScanAll(files: readonly string[], grammarConfig?: string): SgHit[] | 
   return out
 }
 
+/** ast-grep language per file extension; unknown extensions take no rules. */
+function scanLanguage(ext: string): string | undefined {
+  switch (ext) {
+    case '.ts':
+    case '.mts':
+    case '.cts':
+      return 'typescript'
+    case '.js':
+    case '.jsx':
+    case '.mjs':
+    case '.cjs':
+      return 'javascript'
+    case '.tsx':
+      return 'tsx'
+    case '.yml':
+    case '.yaml':
+      return 'yaml'
+    case '.py':
+    case '.pyi':
+      return 'python'
+    case '.go':
+      return 'go'
+    case '.c':
+    case '.h':
+      return 'c'
+    case '.cc':
+    case '.cpp':
+    case '.cxx':
+    case '.hpp':
+    case '.hh':
+      return 'cpp'
+    case '.java':
+      return 'java'
+    case '.rs':
+      return 'rust'
+    case '.lua':
+      return 'lua'
+    case '.swift':
+      return 'swift'
+    case '.scala':
+      return 'scala'
+    case '.dart':
+      return 'dart'
+    case '.kt':
+    case '.kts':
+      return 'kotlin'
+    case '.rb':
+      return 'ruby'
+    case '.php':
+      return 'php'
+    case '.cs':
+      return 'csharp'
+    case '.ex':
+    case '.exs':
+      return 'elixir'
+    case '.zig':
+      return 'zig'
+    default:
+      return undefined
+  }
+}
+
 /** One bounded `ast-grep scan` spawn. */
 function sgScanBatch(files: readonly string[], grammarConfig?: string): SgHit[] | undefined {
-  const config = grammarConfig !== undefined ? ['--config', grammarConfig] : []
-  const result = spawnSync('ast-grep', ['scan', ...config, '--inline-rules', sgRulesDoc(grammarConfig !== undefined), '--json=compact', ...files], {
-    encoding: 'utf8',
-    maxBuffer: 32 * 1024 * 1024,
-  })
-  if (result.status !== 0) return undefined
-  const stdout = result.stdout.trim()
-  if (stdout === '') return []
-  try {
-    const parsed = JSON.parse(stdout) as unknown
-    if (Array.isArray(parsed)) return parsed as SgHit[]
-  } catch {
-    return undefined
+  // One spawn per language present: the engine evaluates every rule in the
+  // doc against every file, so a single 86-rule doc costs per-file eval time
+  // linear in rule count. Per-language docs keep each spawn's rule set small.
+  const byLang = new Map<string, string[]>()
+  for (const file of files) {
+    const lang = scanLanguage(extname(file).toLowerCase())
+    if (lang === undefined) continue
+    const list = byLang.get(lang)
+    if (list === undefined) byLang.set(lang, [file])
+    else list.push(file)
   }
-  return undefined
+  const config = grammarConfig !== undefined ? ['--config', grammarConfig] : []
+  const withZig = grammarConfig !== undefined
+  const out: SgHit[] = []
+  for (const [lang, langFiles] of byLang) {
+    const doc = sgRulesDocFor(withZig, lang)
+    if (doc === undefined) continue
+    const result = spawnSync('ast-grep', ['scan', ...config, '--inline-rules', doc, '--json=compact', ...langFiles], {
+      encoding: 'utf8',
+      maxBuffer: 32 * 1024 * 1024,
+    })
+    if (result.status !== 0) return undefined
+    const stdout = result.stdout.trim()
+    if (stdout === '') continue
+    try {
+      const parsed = JSON.parse(stdout) as unknown
+      if (Array.isArray(parsed)) out.push(...(parsed as SgHit[]))
+      else return undefined
+    } catch {
+      return undefined
+    }
+  }
+  return out
 }
 
 function meta(hit: SgHit, name: string): string {
