@@ -437,7 +437,7 @@ function sgScanAll(files: readonly string[]): SgHit[] | undefined {
 
 /** One bounded `ast-grep scan` spawn. */
 function sgScanBatch(files: readonly string[]): SgHit[] | undefined {
-  const result = spawnSync('ast-grep', ['scan', '--inline-rules', sgRulesDoc(), '--json', ...files], {
+  const result = spawnSync('ast-grep', ['scan', '--inline-rules', sgRulesDoc(), '--json=compact', ...files], {
     encoding: 'utf8',
     maxBuffer: 32 * 1024 * 1024,
   })
