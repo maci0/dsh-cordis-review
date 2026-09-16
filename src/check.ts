@@ -4,8 +4,9 @@
  * Every tag (`mix-export`, `inject`, `toplevel`, `id`) is an ast-grep query.
  * `CheckOptions.astGrep` forces the engine on (`true`: throw when the binary
  * is missing) or off (`false`: every covered file takes the fallback path);
- * omit to auto-detect. ast-grep has no Zig grammar, so `.zig` files always
- * take the fallback path: a warning on stderr plus an LLM-fallback handoff in
+ * omit to auto-detect. The ast-grep binary ships no Zig grammar, so `.zig`
+ * files take the fallback path unless `grammarConfig` registers one: a
+ * warning on stderr plus an LLM-fallback handoff in
  * the message (the review agent reads the message and judges the file).
  *
  * @module dsh-cordis-review/check
@@ -34,6 +35,13 @@ export interface CheckOptions {
    * covered file takes the warning + LLM-fallback path). Omit to auto-detect.
    */
   readonly astGrep?: boolean
+  /**
+   * Path to an `sgconfig.yml` registering custom grammars (e.g. Zig, C3,
+   * Hare — see ast-grep-grammars). Forwarded as `ast-grep scan --config`,
+   * enabling `language:` rows the binary does not ship. `.zig` files take
+   * the LLM-fallback path unless a config providing a `zig` language is given.
+   */
+  readonly grammarConfig?: string
 }
 
 const SKIP_DIR = new Set([
@@ -128,7 +136,7 @@ function isSkippedDir(part: string): boolean {
 
 const SCRIPT = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'])
 const YAML = new Set(['.yml', '.yaml'])
-const POLYGLOT = new Set(['.py', '.pyi', '.go', '.c', '.h', '.cc', '.cpp', '.cxx', '.hpp', '.hh', '.java', '.rs', '.lua', '.swift', '.scala', '.dart', '.kt', '.kts', '.rb', '.php'])
+const POLYGLOT = new Set(['.py', '.pyi', '.go', '.c', '.h', '.cc', '.cpp', '.cxx', '.hpp', '.hh', '.java', '.rs', '.lua', '.swift', '.scala', '.dart', '.kt', '.kts', '.rb', '.php', '.cs', '.ex', '.exs'])
 /** Extensions whose text is read before scanning (only to skip browser bundles). */
 const SKIPPABLE = new Set(['.js', '.jsx', '.mjs', '.cjs'])
 
@@ -208,7 +216,7 @@ const CTX_HEAD = '^\\$?(ctx|scope|hostCtx|context)\\b'
  * readability — matches carry ruleId, so evaluation order never changes output.
  * Keep the member/call/toplevel triple together per family when adding rules.
  */
-function sgRulesDoc(): string {
+function sgRulesDoc(withZig = false): string {
   const rules: SgRule[] = [
     // yaml ids
     { id: 'u-id', language: 'yaml', pattern: 'id: $ID' },
@@ -251,6 +259,8 @@ function sgRulesDoc(): string {
     { id: 'm-kotlin', language: 'kotlin', kind: 'navigation_expression', regex: CTX_HEAD },
     { id: 'm-ruby', language: 'ruby', kind: 'call', regex: CTX_HEAD },
     { id: 'm-php', language: 'php', pattern: '$C->$K', regex: CTX_HEAD },
+    { id: 'm-csharp', language: 'csharp', kind: 'member_access_expression', regex: CTX_HEAD },
+    { id: 'm-elixir', language: 'elixir', pattern: '$C.$K', regex: CTX_HEAD },
     // toplevel-shaped calls at depth 0 via inside-negation.
     // ast-grep `inside` does not see through fn bodies in some grammars
     // (rust `function_item`, go closures), so toplevel also keeps the old
@@ -271,6 +281,10 @@ function sgRulesDoc(): string {
     { id: 't-kotlin', language: 'kotlin', kind: 'call_expression', regex: CTX_HEAD, notInside: ['function_declaration'] },
     { id: 't-ruby', language: 'ruby', kind: 'call', regex: CTX_HEAD, notInside: ['method'] },
     { id: 't-php', language: 'php', pattern: '$C->$M($$$ARGS)', regex: CTX_HEAD, notInside: ['function_definition'] },
+    { id: 't-csharp', language: 'csharp', kind: 'invocation_expression', regex: CTX_HEAD, notInside: ['method_declaration', 'local_function_statement'] },
+    // No t-elixir: every elixir node is a `call`, so `inside` negation cannot
+    // separate def bodies from module top level (verified empirically); the
+    // brace-depth backstop cannot see `do/end` either. Inject precision only.
     // bare `register(` — kept parallel to the old per-file query; C/C++ use
     // kind+regex because `register($$$ARGS)` does not parse there
     { id: 't-bare-py', language: 'python', pattern: 'register($$$ARGS)', notInside: ['function_definition', 'lambda'] },
@@ -289,6 +303,17 @@ function sgRulesDoc(): string {
     { id: 't-bare-kotlin', language: 'kotlin', pattern: 'register($$$ARGS)', notInside: ['function_declaration'] },
     { id: 't-bare-ruby', language: 'ruby', pattern: 'register($$$ARGS)', notInside: ['method'] },
     { id: 't-bare-php', language: 'php', pattern: 'register($$$ARGS)', notInside: ['function_definition'] },
+    { id: 't-bare-csharp', language: 'csharp', pattern: 'register($$$ARGS)', notInside: ['method_declaration', 'local_function_statement'] },
+    // No t-bare-elixir: same `call`-shaped AST reason as t-elixir above.
+    // Zig rows need a custom grammar: only emitted when `grammarConfig`
+    // registers one — an unknown `language:` poisons the whole inline doc.
+    ...(withZig
+      ? [
+          { id: 'm-zig', language: 'zig', pattern: '$C.$K', regex: CTX_HEAD },
+          { id: 't-zig', language: 'zig', kind: 'call_expression', regex: CTX_HEAD, notInside: ['function_declaration'] },
+          { id: 't-bare-zig', language: 'zig', pattern: 'register($$$ARGS)', notInside: ['function_declaration'] },
+        ] as SgRule[]
+      : []),
     // ctx.get / ctx.inject widening (data for the inject pass)
     { id: 'u-get-ts', language: 'typescript', pattern: '$C.get($$$ARGS)', regex: CTX_HEAD },
     { id: 'u-get-js', language: 'javascript', pattern: '$C.get($$$ARGS)', regex: CTX_HEAD },
@@ -360,13 +385,16 @@ export async function check(root: string, options: CheckOptions = {}): Promise<r
       if (text !== undefined && text.includes('__ModuleLoader__')) continue
       covered.push(abs)
     } else if (ext === '.zig') {
-      zig.push(abs)
+      // Custom grammars (via `grammarConfig`) make zig scannable; without
+      // one there is no grammar, so keep the LLM-fallback path.
+      if (options.grammarConfig !== undefined) covered.push(abs)
+      else zig.push(abs)
     }
   }
 
   // Single scan spawn for the whole tree; per-file grouping below is just
   // bucketing matches by their `file` field, not more engine calls.
-  const raw = wantSg ? sgScanAll(covered) : undefined
+  const raw = wantSg ? sgScanAll(covered, options.grammarConfig) : undefined
   if (raw === undefined && wantSg) {
     const first = covered.length > 0 ? relative(root, covered[0] ?? '').split('\\').join('/') : root
     sgOrThrow(first)
@@ -449,7 +477,7 @@ interface SgHit {
 }
 
 /** `ast-grep scan` spawns over every covered file: hits, [] on no match, undefined on engine failure. */
-function sgScanAll(files: readonly string[]): SgHit[] | undefined {
+function sgScanAll(files: readonly string[], grammarConfig?: string): SgHit[] | undefined {
   if (files.length === 0) return []
   // One spawn per 50 files: bounds argv size and keeps each batch's JSON
   // stdout inside maxBuffer (dense trees emit ~0.5MB/file). A single file
@@ -458,7 +486,7 @@ function sgScanAll(files: readonly string[]): SgHit[] | undefined {
   // ponytail: fixed chunks; stream stdout to disk if a real tree ever hits the ceiling.
   const out: SgHit[] = []
   for (let index = 0; index < files.length; index += 50) {
-    const batch = sgScanBatch(files.slice(index, index + 50))
+    const batch = sgScanBatch(files.slice(index, index + 50), grammarConfig)
     if (batch === undefined) return undefined
     out.push(...batch)
   }
@@ -466,8 +494,9 @@ function sgScanAll(files: readonly string[]): SgHit[] | undefined {
 }
 
 /** One bounded `ast-grep scan` spawn. */
-function sgScanBatch(files: readonly string[]): SgHit[] | undefined {
-  const result = spawnSync('ast-grep', ['scan', '--inline-rules', sgRulesDoc(), '--json=compact', ...files], {
+function sgScanBatch(files: readonly string[], grammarConfig?: string): SgHit[] | undefined {
+  const config = grammarConfig !== undefined ? ['--config', grammarConfig] : []
+  const result = spawnSync('ast-grep', ['scan', ...config, '--inline-rules', sgRulesDoc(grammarConfig !== undefined), '--json=compact', ...files], {
     encoding: 'utf8',
     maxBuffer: 32 * 1024 * 1024,
   })
@@ -624,7 +653,7 @@ function sgScript(rel: string, byRule: ReadonlyMap<string, readonly SgHit[]>, te
 
 async function sgPolyglot(rel: string, byRule: ReadonlyMap<string, readonly SgHit[]>, abs: string): Promise<Finding[]> {
   const text = await readFile(abs, 'utf8')
-  return sgMembersAndToplevel(rel, byRule, text, true, 'm-py', 'm-go', 'm-c', 'm-cpp', 'm-java', 'm-rust', 'm-lua', 'm-swift', 'm-scala', 'm-dart', 'm-kotlin', 'm-ruby', 'm-php', 't-py', 't-go', 't-rs', 't-java', 't-c', 't-cpp', 't-lua', 't-swift', 't-scala', 't-dart', 't-kotlin', 't-ruby', 't-php')
+  return sgMembersAndToplevel(rel, byRule, text, true, 'm-py', 'm-go', 'm-c', 'm-cpp', 'm-java', 'm-rust', 'm-lua', 'm-swift', 'm-scala', 'm-dart', 'm-kotlin', 'm-ruby', 'm-php', 'm-csharp', 'm-elixir', 'm-zig', 't-py', 't-go', 't-rs', 't-java', 't-c', 't-cpp', 't-lua', 't-swift', 't-scala', 't-dart', 't-kotlin', 't-ruby', 't-php', 't-csharp', 't-zig')
 }
 
 /** Shared inject + toplevel pass over one scan's member/call matches. */

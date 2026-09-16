@@ -228,11 +228,13 @@ test('polyglot inject via ast-grep kinds and patterns', async () => {
     'src/a.kt': 'fun apply(ctx: Ctx) { ctx.jobs.run() }\n',
     'src/a.rb': 'def apply(ctx); ctx.jobs.run; end\n',
     'src/a.php': '<?php function apply($ctx) { $ctx->jobs->run(); }\n',
+    'src/a.cs': 'class A { void Apply(Ctx ctx) { ctx.jobs.run(); } }\n',
+    'src/a.ex': 'defmodule M do\n  def apply(ctx), do: ctx.jobs.run()\nend\n',
   }
   await withTree(files, async (root) => {
     const hits = await check(root, { astGrep: true })
     const langs = new Set(hits.filter((h) => h.tag === 'inject').map((h) => h.file.split('.').pop()))
-    for (const ext of ['go', 'rs', 'c', 'cpp', 'java', 'lua', 'swift', 'scala', 'dart', 'kt', 'rb', 'php']) {
+    for (const ext of ['go', 'rs', 'c', 'cpp', 'java', 'lua', 'swift', 'scala', 'dart', 'kt', 'rb', 'php', 'cs', 'ex']) {
       assert.ok(langs.has(ext), ext)
     }
   })
@@ -280,6 +282,30 @@ test('toplevel: braces in strings and comments do not corrupt depth', async () =
       const hits = await check(root, { astGrep: true })
       const tops = hits.filter((h) => h.tag === 'toplevel').map((h) => `${h.file}:${h.line}`)
       assert.deepEqual(tops, ['src/a.py:2', 'src/b.ts:5', 'src/c.lua:2'])
+    },
+  )
+})
+
+test('zig via grammarConfig: analytic hits instead of LLM fallback', async () => {
+  const { access } = await import('node:fs/promises')
+  // Local-only registry (not vendored): skip loudly when absent.
+  const config = '/home/maci/Desktop/Projects/maci0/ast-grep-grammars/sgconfig.yml'
+  try {
+    await access(config)
+  } catch {
+    console.warn('skip: zig grammar registry not present at ' + config)
+    return
+  }
+  await withTree(
+    {
+      'src/a.zig': 'pub fn apply(ctx: Ctx) void {\n    ctx.jobs.run();\n}\n',
+    },
+    async (root) => {
+      const without = await check(root, { astGrep: true })
+      assert.match(without[0]?.message ?? '', /LLM fallback/)
+      const hits = await check(root, { astGrep: true, grammarConfig: config })
+      assert.ok(hits.some((h) => h.tag === 'inject' && h.message.includes('jobs')))
+      assert.ok(hits.every((h) => !h.message.includes('LLM fallback')))
     },
   )
 })
