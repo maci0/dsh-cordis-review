@@ -121,10 +121,9 @@ const SKIP_DIR = new Set([
 
 /** Generated dirs with a variable prefix/suffix the exact set cannot name. */
 function isSkippedDir(part: string): boolean {
-  if (SKIP_DIR.has(part)) return true
-  if (part.endsWith('.egg-info')) return true // pip build output: <pkg>.egg-info
-  if (part.startsWith('cmake-build-')) return true // CLion CMake output
-  return false
+  return (
+    SKIP_DIR.has(part) || part.endsWith('.egg-info') || part.startsWith('cmake-build-')
+  ) // pip / CLion output
 }
 
 const SCRIPT = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'])
@@ -176,10 +175,16 @@ const NONTS_KEY = /^[A-Za-z][A-Za-z0-9]*$/
  * True when `line` continues `alias.KEY` with another `.` / `->`
  * dereference. A service is a namespace called into (`ctx.jobs.run()`); a
  * bare `ctx.snapshot()` is a method call, not a coeffect.
- * alias/key are IDENT-constrained, so interpolation is regex-safe.
  */
+const CONTINUED = /(?:^|[^\w])(ctx|scope|hostCtx|context)\s*(?:\.|->)\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\.|->)/
+const CONTINUED_G = new RegExp(CONTINUED.source, 'g')
 function continuedAccess(line: string, alias: string, key: string): boolean {
-  return new RegExp(`(?:^|[^\\w])${alias}\\s*(?:\\.|->)\\s*${key}\\s*(?:\\.|->)`).test(` ${line}`)
+  CONTINUED_G.lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = CONTINUED_G.exec(` ${line}`)) !== null) {
+    if (match[1] === alias && match[2] === key) return true
+  }
+  return false
 }
 
 /** One ast-grep `scan` rule: one engine spawn covers every file of these languages. */
@@ -349,22 +354,22 @@ export async function check(root: string, options: CheckOptions = {}): Promise<r
   for (const abs of covered) {
     const rel = relative(root, abs).split('\\').join('/')
     const ext = extname(abs).toLowerCase()
-    const hits = byFile.get(abs) ?? []
+    const byRule = indexHits(byFile.get(abs) ?? [])
     if (!wantSg) {
       warn(`${rel}: ast-grep off or unavailable for ${ext}. LLM fallback: judge this file against the CORDIS checklist yourself.`)
       findings.push({ tag: 'inject', file: rel, line: 1, message: llmFallback(ext) })
       continue
     }
     if (YAML.has(ext)) {
-      findings.push(...sgIds(rel, hits))
+      findings.push(...sgIds(rel, byRule))
       continue
     }
     if (SCRIPT.has(ext)) {
       const text = await readFile(abs, 'utf8')
-      findings.push(...sgScript(rel, hits, text))
+      findings.push(...sgScript(rel, byRule, text))
       continue
     }
-    findings.push(...(await sgPolyglot(rel, hits, abs)))
+    findings.push(...(await sgPolyglot(rel, byRule, abs)))
   }
   for (const abs of zig) {
     const rel = relative(root, abs).split('\\').join('/')
@@ -432,7 +437,6 @@ function sgScanAll(files: readonly string[]): SgHit[] | undefined {
 
 /** One bounded `ast-grep scan` spawn. */
 function sgScanBatch(files: readonly string[]): SgHit[] | undefined {
-  if (files.length === 0) return []
   const result = spawnSync('ast-grep', ['scan', '--inline-rules', sgRulesDoc(), '--json', ...files], {
     encoding: 'utf8',
     maxBuffer: 32 * 1024 * 1024,
@@ -476,15 +480,22 @@ function keysFromValue(value: string): string[] {
   return out
 }
 
-function hitsFor(hits: readonly SgHit[], ...ids: readonly string[]): SgHit[] {
-  const wanted = new Set(ids)
-  return hits.filter((hit) => hit.ruleId !== undefined && wanted.has(hit.ruleId))
+/** Index hits once per file: ruleId → matches. */
+function indexHits(hits: readonly SgHit[]): Map<string, SgHit[]> {
+  const out = new Map<string, SgHit[]>()
+  for (const hit of hits) {
+    if (hit.ruleId === undefined) continue
+    const list = out.get(hit.ruleId)
+    if (list === undefined) out.set(hit.ruleId, [hit])
+    else list.push(hit)
+  }
+  return out
 }
 
-function sgIds(rel: string, hits: readonly SgHit[]): Finding[] {
+function sgIds(rel: string, byRule: ReadonlyMap<string, readonly SgHit[]>): Finding[] {
   const seen = new Map<string, number>()
   const findings: Finding[] = []
-  for (const hit of hitsFor(hits, 'u-id')) {
+  for (const hit of byRule.get('u-id') ?? []) {
     const id = meta(hit, 'ID').replace(/^['"`]|['"`]$/g, '')
     if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(id)) continue
     const line = lineOf(hit)
@@ -504,10 +515,12 @@ function sgIds(rel: string, hits: readonly SgHit[]): Finding[] {
 }
 
 /** Declared inject keys, read as data from `inject = [...]` matches. */
-function declaredKeys(hits: readonly SgHit[]): Set<string> {
+function declaredKeys(byRule: ReadonlyMap<string, readonly SgHit[]>): Set<string> {
   const out = new Set<string>()
-  for (const hit of hitsFor(hits, 'u-decl', 'u-decl-bare', 'u-decl-js', 'u-decl-bare-js', 'u-decl-tsx', 'u-decl-bare-tsx', 'u-decl-py')) {
-    for (const key of keysFromValue(meta(hit, 'V'))) out.add(key)
+  for (const id of ['u-decl', 'u-decl-bare', 'u-decl-js', 'u-decl-bare-js', 'u-decl-tsx', 'u-decl-bare-tsx', 'u-decl-py']) {
+    for (const hit of byRule.get(id) ?? []) {
+      for (const key of keysFromValue(meta(hit, 'V'))) out.add(key)
+    }
   }
   return out
 }
@@ -516,35 +529,40 @@ function declaredKeys(hits: readonly SgHit[]): Set<string> {
  * `ctx.inject([...], scope => …)` widens the alias set: the callback's first
  * parameter carries the declared keys for its body lines.
  */
-function injectWidens(hits: readonly SgHit[]): Map<number, { alias: string; keys: readonly string[] }> {
+function injectWidens(byRule: ReadonlyMap<string, readonly SgHit[]>): Map<number, { alias: string; keys: readonly string[] }> {
   const widens = new Map<number, { alias: string; keys: readonly string[] }>()
-  for (const hit of hitsFor(hits, 'u-inject-ts', 'u-inject-js', 'u-inject-tsx', 'u-inject-py')) {
-    const text = hit.text ?? ''
-    const keys = keysFromValue(/\[([^\]]*)\]/.exec(text)?.[1] ?? '')
-    const alias = /\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*[,)]/.exec(text)?.[1]
-    if (alias === undefined || keys.length === 0) continue
-    widens.set(lineOf(hit), { alias, keys })
+  for (const id of ['u-inject-ts', 'u-inject-js', 'u-inject-tsx', 'u-inject-py']) {
+    for (const hit of byRule.get(id) ?? []) {
+      const text = hit.text ?? ''
+      const keys = keysFromValue(/\[([^\]]*)\]/.exec(text)?.[1] ?? '')
+      const alias = /\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*[,)]/.exec(text)?.[1]
+      if (alias === undefined || keys.length === 0) continue
+      widens.set(lineOf(hit), { alias, keys })
+    }
   }
   return widens
 }
 
 /** `ctx.get('key')` / `scope.get('key')` reads that never need inject. */
-function getReads(hits: readonly SgHit[]): Set<string> {
+function getReads(byRule: ReadonlyMap<string, readonly SgHit[]>): Set<string> {
   const reads = new Set<string>()
-  for (const hit of hitsFor(hits, 'u-get-ts', 'u-get-js', 'u-get-tsx', 'u-get-py')) {
-    const arg = /\(\s*['"`]([A-Za-z_][A-Za-z0-9_]*)['"`]/.exec(hit.text ?? '')?.[1]
-    if (arg !== undefined) reads.add(`${lineOf(hit)}:${arg}`)
+  for (const id of ['u-get-ts', 'u-get-js', 'u-get-tsx', 'u-get-py']) {
+    for (const hit of byRule.get(id) ?? []) {
+      const arg = /\(\s*['"`]([A-Za-z_][A-Za-z0-9_]*)['"`]/.exec(hit.text ?? '')?.[1]
+      if (arg !== undefined) reads.add(`${lineOf(hit)}:${arg}`)
+    }
   }
   return reads
 }
 
-function sgScript(rel: string, hits: readonly SgHit[], text: string): Finding[] {
-  const findings: Finding[] = []
-
-  const defs = hitsFor(hits, 'u-def', 'u-def-js', 'u-def-tsx')
-  if (defs.length > 0) {
-    const names = new Set<string>()
-    for (const hit of hitsFor(hits, 'u-fn', 'u-fn-js', 'u-fn-tsx', 'u-const', 'u-const-js', 'u-const-tsx', 'u-const-typed', 'u-named', 'u-named-js', 'u-named-tsx')) {
+function sgScript(rel: string, byRule: ReadonlyMap<string, readonly SgHit[]>, text: string): Finding[] {
+  const defs = [...(byRule.get('u-def') ?? []), ...(byRule.get('u-def-js') ?? []), ...(byRule.get('u-def-tsx') ?? [])]
+  if (defs.length === 0) {
+    return sgMembersAndToplevel(rel, byRule, text, false, 'm-ts', 'm-js', 'm-tsx', 't-ts', 't-js', 't-tsx')
+  }
+  const names = new Set<string>()
+  for (const id of ['u-fn', 'u-fn-js', 'u-fn-tsx', 'u-const', 'u-const-js', 'u-const-tsx', 'u-const-typed', 'u-named', 'u-named-js', 'u-named-tsx']) {
+    for (const hit of byRule.get(id) ?? []) {
       for (const slot of ['N', 'X'] as const) {
         for (const part of meta(hit, slot).split(',')) {
           const token = part.trim().split(/\s+as\s+/).pop()?.trim() ?? ''
@@ -552,93 +570,97 @@ function sgScript(rel: string, hits: readonly SgHit[], text: string): Finding[] 
         }
       }
     }
-    if (names.has('apply') || names.has('inject')) {
-      findings.push({
-        tag: 'mix-export',
-        file: rel,
-        line: 1,
-        message: 'default export plus named apply/inject. Loader keeps one form; mixing drops inject. Pick one.',
-      })
-    }
   }
+  const findings: Finding[] =
+    names.has('apply') || names.has('inject')
+      ? [
+          {
+            tag: 'mix-export',
+            file: rel,
+            line: 1,
+            message: 'default export plus named apply/inject. Loader keeps one form; mixing drops inject. Pick one.',
+          },
+        ]
+      : []
 
-  return findings.concat(sgMembersAndToplevel(rel, hits, text, false, 'm-ts', 'm-js', 'm-tsx', 't-ts', 't-js', 't-tsx'))
+  return findings.concat(sgMembersAndToplevel(rel, byRule, text, false, 'm-ts', 'm-js', 'm-tsx', 't-ts', 't-js', 't-tsx'))
 }
 
-async function sgPolyglot(rel: string, hits: readonly SgHit[], abs: string): Promise<Finding[]> {
+async function sgPolyglot(rel: string, byRule: ReadonlyMap<string, readonly SgHit[]>, abs: string): Promise<Finding[]> {
   const text = await readFile(abs, 'utf8')
-  return sgMembersAndToplevel(rel, hits, text, true, 'm-py', 'm-go', 'm-c', 'm-cpp', 'm-java', 'm-rust', 't-py')
+  return sgMembersAndToplevel(rel, byRule, text, true, 'm-py', 'm-go', 'm-c', 'm-cpp', 'm-java', 'm-rust', 't-py')
 }
 
 /** Shared inject + toplevel pass over one scan's member/call matches. */
 function sgMembersAndToplevel(
   rel: string,
-  hits: readonly SgHit[],
+  byRule: ReadonlyMap<string, readonly SgHit[]>,
   text: string,
   nonTs: boolean,
   ...ids: readonly string[]
 ): Finding[] {
-  const declared = declaredKeys(hits)
-  const widens = injectWidens(hits)
-  const reads = getReads(hits)
+  const memberIds = ids.filter((id) => id.startsWith('m-'))
+  const callIds = ids.filter((id) => id.startsWith('t-'))
+  const declared = declaredKeys(byRule)
+  const widens = injectWidens(byRule)
+  const reads = getReads(byRule)
   const findings: Finding[] = []
   const seen = new Set<string>()
   const srcLines = text.split(/\r?\n/)
 
-  for (const hit of hitsFor(hits, ...ids.filter((id) => id.startsWith('m-')))) {
-    const parsed = memberKeyFromText(hit.text ?? '')
-    if (parsed === undefined || !CTX_ALIAS.test(parsed.alias)) continue
-    if (!IDENT.test(parsed.key) || CTX_INTRINSICS.has(parsed.key) || declared.has(parsed.key)) continue
-    if (nonTs && !NONTS_KEY.test(parsed.key)) continue
-    // A bare call is a host method, not a coeffect: only `ctx.KEY.…`
-    // survived (covers `ctx.jobs.run()`, Go `ctx.Tools.Register()`), and
-    // the call itself never reads (`ctx.tools.register()` is the service
-    // `tools` providing `register`, already caught at its member). Kind-only
-    // matches (java `field_access`) carry no trailing text, so fall back to
-    // the source line for the continuation check.
-    const contText = continuedAccess(hit.text ?? '', parsed.alias, parsed.key)
-      ? hit.text ?? ''
-      : (srcLines[lineOf(hit) - 1] ?? '')
-    if (nonTs && !continuedAccess(contText, parsed.alias, parsed.key)) continue
-    if (reads.has(`${lineOf(hit)}:${parsed.key}`)) continue
-    if (widened(widens, lineOf(hit), parsed.alias, parsed.key)) continue
-    const id = `${lineOf(hit)}:${parsed.key}`
-    if (seen.has(id)) continue
-    seen.add(id)
-    findings.push({ tag: 'inject', file: rel, line: lineOf(hit), message: injectMessage(parsed.key) })
+  for (const id of memberIds) {
+    for (const hit of byRule.get(id) ?? []) {
+      const parsed = memberKeyFromText(hit.text ?? '')
+      if (parsed === undefined || !CTX_ALIAS.test(parsed.alias)) continue
+      if (!IDENT.test(parsed.key) || CTX_INTRINSICS.has(parsed.key) || declared.has(parsed.key)) continue
+      if (nonTs && !NONTS_KEY.test(parsed.key)) continue
+      // A bare call is a host method, not a coeffect: only `ctx.KEY.…`
+      // survived (covers `ctx.jobs.run()`, Go `ctx.Tools.Register()`), and
+      // the call itself never reads (`ctx.tools.register()` is the service
+      // `tools` providing `register`, already caught at its member). Kind-only
+      // matches (java `field_access`) carry no trailing text, so fall back to
+      // the source line for the continuation check.
+      const contText = continuedAccess(hit.text ?? '', parsed.alias, parsed.key)
+        ? hit.text ?? ''
+        : (srcLines[lineOf(hit) - 1] ?? '')
+      if (nonTs && !continuedAccess(contText, parsed.alias, parsed.key)) continue
+      if (reads.has(`${lineOf(hit)}:${parsed.key}`)) continue
+      if (widened(widens, lineOf(hit), parsed.alias, parsed.key)) continue
+      const seenId = `${lineOf(hit)}:${parsed.key}`
+      if (seen.has(seenId)) continue
+      seen.add(seenId)
+      findings.push({ tag: 'inject', file: rel, line: lineOf(hit), message: injectMessage(parsed.key) })
+    }
   }
 
   const callLines = new Map<number, { recv: string; method: string }>()
-  const callIds = ids.filter((id) => id.startsWith('t-'))
-  for (const hit of hitsFor(hits, ...callIds)) {
-    const text = hit.text ?? ''
-    const ruleId = hit.ruleId ?? ''
-    // t-bare-*: the whole match is the call; method is its callee name.
-    const bareCall = ruleId.startsWith('t-bare-') ? /^register/.exec(text.trim()) !== null : false
-    // Recover receiver+method from one match (C++ `ctx->jobs.run` parses
-    // with C=`ctx->jobs`; kind-only rules carry no metavariables at all).
-    const call = /(?:^|[^\w])(ctx|scope|hostCtx|context)\s*(?:\.|->)\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(` ${text}`)
-    const bare = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(text)
-    // Kind-only matches (go/rust/java/c/cpp) have no receiver info: take the
-    // head member (`ctx.jobs.run()` → `ctx.jobs`) and let the depth pass below
-    // decide toplevel-ness; the inject pass already judged the key.
-    const dotted = /^([A-Za-z_][A-Za-z0-9_]*)\s*(?:\.|->)\s*([A-Za-z_][A-Za-z0-9_]*)/.exec(text.trim())
-    const recv = call?.[1] ?? ''
-    const method = call?.[2] ?? (bareCall ? 'register' : (bare?.[1] ?? dotted?.[2] ?? ''))
-    if (!IDENT.test(method)) continue
-    if (recv === '' && !bareCall && dotted === null) continue
-    callLines.set(lineOf(hit), { recv, method })
+  for (const id of callIds) {
+    for (const hit of byRule.get(id) ?? []) {
+      const text = hit.text ?? ''
+      const ruleId = hit.ruleId ?? ''
+      // t-bare-*: the whole match is the call; method is its callee name.
+      const bareCall = ruleId.startsWith('t-bare-') ? /^register/.exec(text.trim()) !== null : false
+      // Recover receiver+method from one match (C++ `ctx->jobs.run` parses
+      // with C=`ctx->jobs`; kind-only rules carry no metavariables at all).
+      const call = /(?:^|[^\w])(ctx|scope|hostCtx|context)\s*(?:\.|->)\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(` ${text}`)
+      const bare = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(text)
+      // Kind-only matches (go/rust/java/c/cpp) have no receiver info: take the
+      // head member (`ctx.jobs.run()` → `ctx.jobs`) and let the depth pass below
+      // decide toplevel-ness; the inject pass already judged the key.
+      const dotted = /^([A-Za-z_][A-Za-z0-9_]*)\s*(?:\.|->)\s*([A-Za-z_][A-Za-z0-9_]*)/.exec(text.trim())
+      const recv = call?.[1] ?? ''
+      const method = call?.[2] ?? (bareCall ? 'register' : (bare?.[1] ?? dotted?.[2] ?? ''))
+      if (!IDENT.test(method)) continue
+      if (recv === '' && !bareCall && dotted === null) continue
+      callLines.set(lineOf(hit), { recv, method })
+    }
   }
-  // Toplevel = effect-shaped call at brace depth 0 over ast-grep's own call
-  // lines — the match set is ast-grep's, not a second engine. Bare
-  // `register(…)` has no receiver; `registerX` methods match by prefix.
   // Toplevel = effect-shaped call at brace depth 0. ast-grep patterns cannot
   // see depth, so depth stays a brace scan over ast-grep's own call lines —
   // the match set is ast-grep's, not a second engine. Bare `register(…)`
   // has no receiver; `registerX` methods match TOPLEVEL_VERB by prefix.
-  const lines = text.split(/\r?\n/)
   let depth = 0
-  for (let index = 0; index < lines.length; index += 1) {
+  for (let index = 0; index < srcLines.length; index += 1) {
     const call = callLines.get(index + 1)
     if (
       depth === 0 && call !== undefined && TOPLEVEL_VERB.test(call.method)
@@ -651,7 +673,7 @@ function sgMembersAndToplevel(
         message: 'effect at module load. Move it into apply(ctx) / the Service constructor.',
       })
     }
-    const line = lines[index] ?? ''
+    const line = srcLines[index] ?? ''
     for (const ch of line) {
       if (ch === '{' || ch === '(') depth += 1
       if (ch === '}' || ch === ')') depth -= 1
