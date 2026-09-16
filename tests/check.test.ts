@@ -221,11 +221,15 @@ test('polyglot inject via ast-grep kinds and patterns', async () => {
     'src/a.c': 'void apply(Ctx ctx) { ctx.tools.register(); }\n',
     'src/a.cpp': 'void apply(Ctx* ctx) { ctx->jobs.run(); }\n',
     'src/A.java': 'class A { void apply(Ctx ctx) { ctx.tools.register(); } }\n',
+    'src/a.lua': 'function apply(ctx) ctx.jobs.run() end\n',
+    'src/a.swift': 'func apply(ctx: Ctx) { ctx.jobs.run() }\n',
+    'src/a.scala': 'def apply(ctx: Ctx) = ctx.jobs.run()\n',
+    'src/a.dart': 'void apply(Ctx ctx) { ctx.jobs.run(); }\n',
   }
   await withTree(files, async (root) => {
     const hits = await check(root, { astGrep: true })
     const langs = new Set(hits.filter((h) => h.tag === 'inject').map((h) => h.file.split('.').pop()))
-    for (const ext of ['go', 'rs', 'c', 'cpp', 'java']) {
+    for (const ext of ['go', 'rs', 'c', 'cpp', 'java', 'lua', 'swift', 'scala', 'dart']) {
       assert.ok(langs.has(ext), ext)
     }
   })
@@ -238,10 +242,12 @@ test('non-TS: bare calls and underscore members are locals', async () => {
     'src/a.cpp': 'void apply(Ctx* ctx) {\n    ctx->snapshot();\n    ctx->jobs->run();\n}\n',
     'src/a.rs': 'fn apply(ctx: Ctx) {\n    ctx.snapshot();\n    ctx.jobs.run();\n}\n',
     'src/A.java': 'class A { void apply(Ctx ctx) { ctx.snapshot(); ctx.jobs.run(); } }\n',
+    'src/a.lua': 'function lonely() ctx.snapshot() end\nfunction apply(ctx) ctx.jobs.run() end\n',
+    'src/a.swift': 'func apply(ctx: Ctx) { ctx.jobs.run() }\n',
   }
   await withTree(files, async (root) => {
     const hits = await check(root, { astGrep: true })
-    assert.equal(hits.filter((h) => h.tag === 'inject').length, 5)
+    assert.equal(hits.filter((h) => h.tag === 'inject').length, 7)
     assert.ok(hits.every((h) => h.message.includes('jobs')))
   })
 })
@@ -265,11 +271,12 @@ test('toplevel: braces in strings and comments do not corrupt depth', async () =
     {
       'src/a.py': 's = "{"\nctx.effect()\n',
       'src/b.ts': 'export function apply(ctx) {\n  ctx.tools.register(() => {})\n}\n// }\nctx.effect(() => () => {})\n',
+      'src/c.lua': 'function apply(ctx) ctx.jobs.run() end\nctx.effect()\n',
     },
     async (root) => {
       const hits = await check(root, { astGrep: true })
       const tops = hits.filter((h) => h.tag === 'toplevel').map((h) => `${h.file}:${h.line}`)
-      assert.deepEqual(tops, ['src/a.py:2', 'src/b.ts:5'])
+      assert.deepEqual(tops, ['src/a.py:2', 'src/b.ts:5', 'src/c.lua:2'])
     },
   )
 })

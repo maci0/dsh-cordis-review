@@ -128,7 +128,7 @@ function isSkippedDir(part: string): boolean {
 
 const SCRIPT = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'])
 const YAML = new Set(['.yml', '.yaml'])
-const POLYGLOT = new Set(['.py', '.pyi', '.go', '.c', '.h', '.cc', '.cpp', '.cxx', '.hpp', '.hh', '.java', '.rs'])
+const POLYGLOT = new Set(['.py', '.pyi', '.go', '.c', '.h', '.cc', '.cpp', '.cxx', '.hpp', '.hh', '.java', '.rs', '.lua', '.swift', '.scala', '.dart'])
 /** Extensions whose text is read before scanning (only to skip browser bundles). */
 const SKIPPABLE = new Set(['.js', '.jsx', '.mjs', '.cjs'])
 
@@ -244,6 +244,10 @@ function sgRulesDoc(): string {
     { id: 'm-cpp', language: 'cpp', kind: 'field_expression', regex: CTX_HEAD },
     { id: 'm-java', language: 'java', kind: 'field_access', regex: CTX_HEAD },
     { id: 'm-rust', language: 'rust', pattern: '$C.$K', regex: CTX_HEAD },
+    { id: 'm-lua', language: 'lua', pattern: '$C.$K', regex: CTX_HEAD },
+    { id: 'm-swift', language: 'swift', pattern: '$C.$K', regex: CTX_HEAD },
+    { id: 'm-scala', language: 'scala', pattern: '$C.$K', regex: CTX_HEAD },
+    { id: 'm-dart', language: 'dart', kind: 'member_expression', regex: CTX_HEAD },
     // toplevel-shaped calls at depth 0 via inside-negation.
     // ast-grep `inside` does not see through fn bodies in some grammars
     // (rust `function_item`, go closures), so toplevel also keeps the old
@@ -257,6 +261,10 @@ function sgRulesDoc(): string {
     { id: 't-java', language: 'java', kind: 'method_invocation', regex: CTX_HEAD, notInside: ['method_declaration'] },
     { id: 't-c', language: 'c', kind: 'call_expression', regex: CTX_HEAD, notInside: ['function_definition'] },
     { id: 't-cpp', language: 'cpp', kind: 'call_expression', regex: CTX_HEAD, notInside: ['function_definition'] },
+    { id: 't-lua', language: 'lua', kind: 'function_call', regex: CTX_HEAD, notInside: ['function_declaration'] },
+    { id: 't-swift', language: 'swift', kind: 'call_expression', regex: CTX_HEAD, notInside: ['function_declaration'] },
+    { id: 't-scala', language: 'scala', kind: 'call_expression', regex: CTX_HEAD, notInside: ['function_definition'] },
+    { id: 't-dart', language: 'dart', kind: 'call_expression', regex: CTX_HEAD, notInside: ['function_declaration'] },
     // bare `register(` — kept parallel to the old per-file query; C/C++ use
     // kind+regex because `register($$$ARGS)` does not parse there
     { id: 't-bare-py', language: 'python', pattern: 'register($$$ARGS)', notInside: ['function_definition', 'lambda'] },
@@ -268,6 +276,10 @@ function sgRulesDoc(): string {
     { id: 't-bare-tsx', language: 'tsx', pattern: 'register($$$ARGS)', notInside: ['function_declaration', 'arrow_function', 'function_expression', 'method_definition'] },
     { id: 't-bare-c', language: 'c', kind: 'call_expression', textPrefix: 'register', notInside: ['function_definition'] },
     { id: 't-bare-cpp', language: 'cpp', kind: 'call_expression', textPrefix: 'register', notInside: ['function_definition'] },
+    { id: 't-bare-lua', language: 'lua', pattern: 'register($$$ARGS)', notInside: ['function_declaration'] },
+    { id: 't-bare-swift', language: 'swift', pattern: 'register($$$ARGS)', notInside: ['function_declaration'] },
+    { id: 't-bare-scala', language: 'scala', pattern: 'register($$$ARGS)', notInside: ['function_definition'] },
+    { id: 't-bare-dart', language: 'dart', kind: 'call_expression', textPrefix: 'register', notInside: ['function_declaration'] },
     // ctx.get / ctx.inject widening (data for the inject pass)
     { id: 'u-get-ts', language: 'typescript', pattern: '$C.get($$$ARGS)', regex: CTX_HEAD },
     { id: 'u-get-js', language: 'javascript', pattern: '$C.get($$$ARGS)', regex: CTX_HEAD },
@@ -603,7 +615,7 @@ function sgScript(rel: string, byRule: ReadonlyMap<string, readonly SgHit[]>, te
 
 async function sgPolyglot(rel: string, byRule: ReadonlyMap<string, readonly SgHit[]>, abs: string): Promise<Finding[]> {
   const text = await readFile(abs, 'utf8')
-  return sgMembersAndToplevel(rel, byRule, text, true, 'm-py', 'm-go', 'm-c', 'm-cpp', 'm-java', 'm-rust', 't-py')
+  return sgMembersAndToplevel(rel, byRule, text, true, 'm-py', 'm-go', 'm-c', 'm-cpp', 'm-java', 'm-rust', 'm-lua', 'm-swift', 'm-scala', 'm-dart', 't-py', 't-go', 't-rs', 't-java', 't-c', 't-cpp', 't-lua', 't-swift', 't-scala', 't-dart')
 }
 
 /** Shared inject + toplevel pass over one scan's member/call matches. */
