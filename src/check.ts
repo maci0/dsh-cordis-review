@@ -413,8 +413,25 @@ interface SgHit {
   readonly metaVariables?: { readonly single?: Record<string, { readonly text?: string }> }
 }
 
-/** One `ast-grep scan` spawn over every covered file: hits, [] on no match, undefined on engine failure. */
+/** `ast-grep scan` spawns over every covered file: hits, [] on no match, undefined on engine failure. */
 function sgScanAll(files: readonly string[]): SgHit[] | undefined {
+  if (files.length === 0) return []
+  // One spawn per 50 files: bounds argv size and keeps each batch's JSON
+  // stdout inside maxBuffer (dense trees emit ~0.5MB/file). A single file
+  // with >32MB of matches still overflows its batch — that is ~100k matches
+  // in one file, not a real tree.
+  // ponytail: fixed chunks; stream stdout to disk if a real tree ever hits the ceiling.
+  const out: SgHit[] = []
+  for (let index = 0; index < files.length; index += 50) {
+    const batch = sgScanBatch(files.slice(index, index + 50))
+    if (batch === undefined) return undefined
+    out.push(...batch)
+  }
+  return out
+}
+
+/** One bounded `ast-grep scan` spawn. */
+function sgScanBatch(files: readonly string[]): SgHit[] | undefined {
   if (files.length === 0) return []
   const result = spawnSync('ast-grep', ['scan', '--inline-rules', sgRulesDoc(), '--json', ...files], {
     encoding: 'utf8',
