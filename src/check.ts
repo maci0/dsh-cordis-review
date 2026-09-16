@@ -193,10 +193,15 @@ interface SgRule {
   readonly language: string
   readonly pattern?: string
   readonly kind?: string
+  /** Extra `regex` constraint ANDed onto the rule (matches receiver-headed text). */
+  readonly regex?: string
   /** Matches whose text starts with this (with `kind`): bare calls like `register(`. */
   readonly textPrefix?: string
   readonly notInside?: readonly string[]
 }
+
+/** Prune non-`ctx` matches inside the engine: member/call/get/inject texts start at the receiver. */
+const CTX_HEAD = '^(ctx|scope|hostCtx|context)\\b'
 
 /**
  * Single multi-language rule document. Rule order is load-bearing only for
@@ -230,28 +235,28 @@ function sgRulesDoc(): string {
     { id: 'u-decl-bare-tsx', language: 'tsx', pattern: 'inject = $V' },
     { id: 'u-decl-py', language: 'python', pattern: 'inject = $V' },
     // member reads ($C.$K)
-    { id: 'm-ts', language: 'typescript', pattern: '$C.$K' },
-    { id: 'm-js', language: 'javascript', pattern: '$C.$K' },
-    { id: 'm-tsx', language: 'tsx', pattern: '$C.$K' },
-    { id: 'm-py', language: 'python', pattern: '$C.$K' },
-    { id: 'm-go', language: 'go', kind: 'selector_expression' },
-    { id: 'm-c', language: 'c', pattern: '$C.$K' },
-    { id: 'm-cpp', language: 'cpp', kind: 'field_expression' },
-    { id: 'm-java', language: 'java', kind: 'field_access' },
-    { id: 'm-rust', language: 'rust', pattern: '$C.$K' },
+    { id: 'm-ts', language: 'typescript', pattern: '$C.$K', regex: CTX_HEAD },
+    { id: 'm-js', language: 'javascript', pattern: '$C.$K', regex: CTX_HEAD },
+    { id: 'm-tsx', language: 'tsx', pattern: '$C.$K', regex: CTX_HEAD },
+    { id: 'm-py', language: 'python', pattern: '$C.$K', regex: CTX_HEAD },
+    { id: 'm-go', language: 'go', kind: 'selector_expression', regex: CTX_HEAD },
+    { id: 'm-c', language: 'c', pattern: '$C.$K', regex: CTX_HEAD },
+    { id: 'm-cpp', language: 'cpp', kind: 'field_expression', regex: CTX_HEAD },
+    { id: 'm-java', language: 'java', kind: 'field_access', regex: CTX_HEAD },
+    { id: 'm-rust', language: 'rust', pattern: '$C.$K', regex: CTX_HEAD },
     // toplevel-shaped calls at depth 0 via inside-negation.
     // ast-grep `inside` does not see through fn bodies in some grammars
     // (rust `function_item`, go closures), so toplevel also keeps the old
     // brace-depth line pass over these matches — the match set is ast-grep's.
-    { id: 't-ts', language: 'typescript', pattern: '$C.$M($$$ARGS)', notInside: ['function_declaration', 'arrow_function', 'function_expression', 'method_definition'] },
-    { id: 't-js', language: 'javascript', pattern: '$C.$M($$$ARGS)', notInside: ['function_declaration', 'arrow_function', 'function_expression', 'method_definition'] },
-    { id: 't-tsx', language: 'tsx', pattern: '$C.$M($$$ARGS)', notInside: ['function_declaration', 'arrow_function', 'function_expression', 'method_definition'] },
-    { id: 't-py', language: 'python', pattern: '$C.$M($$$ARGS)', notInside: ['function_definition', 'lambda'] },
-    { id: 't-go', language: 'go', kind: 'call_expression', notInside: ['function_declaration', 'func_literal'] },
-    { id: 't-rs', language: 'rust', kind: 'call_expression', notInside: ['function_item'] },
-    { id: 't-java', language: 'java', kind: 'method_invocation', notInside: ['method_declaration'] },
-    { id: 't-c', language: 'c', kind: 'call_expression', notInside: ['function_definition'] },
-    { id: 't-cpp', language: 'cpp', kind: 'call_expression', notInside: ['function_definition'] },
+    { id: 't-ts', language: 'typescript', pattern: '$C.$M($$$ARGS)', regex: CTX_HEAD, notInside: ['function_declaration', 'arrow_function', 'function_expression', 'method_definition'] },
+    { id: 't-js', language: 'javascript', pattern: '$C.$M($$$ARGS)', regex: CTX_HEAD, notInside: ['function_declaration', 'arrow_function', 'function_expression', 'method_definition'] },
+    { id: 't-tsx', language: 'tsx', pattern: '$C.$M($$$ARGS)', regex: CTX_HEAD, notInside: ['function_declaration', 'arrow_function', 'function_expression', 'method_definition'] },
+    { id: 't-py', language: 'python', pattern: '$C.$M($$$ARGS)', regex: CTX_HEAD, notInside: ['function_definition', 'lambda'] },
+    { id: 't-go', language: 'go', kind: 'call_expression', regex: CTX_HEAD, notInside: ['function_declaration', 'func_literal'] },
+    { id: 't-rs', language: 'rust', kind: 'call_expression', regex: CTX_HEAD, notInside: ['function_item'] },
+    { id: 't-java', language: 'java', kind: 'method_invocation', regex: CTX_HEAD, notInside: ['method_declaration'] },
+    { id: 't-c', language: 'c', kind: 'call_expression', regex: CTX_HEAD, notInside: ['function_definition'] },
+    { id: 't-cpp', language: 'cpp', kind: 'call_expression', regex: CTX_HEAD, notInside: ['function_definition'] },
     // bare `register(` — kept parallel to the old per-file query; C/C++ use
     // kind+regex because `register($$$ARGS)` does not parse there
     { id: 't-bare-py', language: 'python', pattern: 'register($$$ARGS)', notInside: ['function_definition', 'lambda'] },
@@ -264,14 +269,14 @@ function sgRulesDoc(): string {
     { id: 't-bare-c', language: 'c', kind: 'call_expression', textPrefix: 'register', notInside: ['function_definition'] },
     { id: 't-bare-cpp', language: 'cpp', kind: 'call_expression', textPrefix: 'register', notInside: ['function_definition'] },
     // ctx.get / ctx.inject widening (data for the inject pass)
-    { id: 'u-get-ts', language: 'typescript', pattern: '$C.get($$$ARGS)' },
-    { id: 'u-get-js', language: 'javascript', pattern: '$C.get($$$ARGS)' },
-    { id: 'u-get-tsx', language: 'tsx', pattern: '$C.get($$$ARGS)' },
-    { id: 'u-get-py', language: 'python', pattern: '$C.get($$$ARGS)' },
-    { id: 'u-inject-ts', language: 'typescript', pattern: '$C.inject($$$ARGS)' },
-    { id: 'u-inject-js', language: 'javascript', pattern: '$C.inject($$$ARGS)' },
-    { id: 'u-inject-tsx', language: 'tsx', pattern: '$C.inject($$$ARGS)' },
-    { id: 'u-inject-py', language: 'python', pattern: '$C.inject($$$ARGS)' },
+    { id: 'u-get-ts', language: 'typescript', pattern: '$C.get($$$ARGS)', regex: CTX_HEAD },
+    { id: 'u-get-js', language: 'javascript', pattern: '$C.get($$$ARGS)', regex: CTX_HEAD },
+    { id: 'u-get-tsx', language: 'tsx', pattern: '$C.get($$$ARGS)', regex: CTX_HEAD },
+    { id: 'u-get-py', language: 'python', pattern: '$C.get($$$ARGS)', regex: CTX_HEAD },
+    { id: 'u-inject-ts', language: 'typescript', pattern: '$C.inject($$$ARGS)', regex: CTX_HEAD },
+    { id: 'u-inject-js', language: 'javascript', pattern: '$C.inject($$$ARGS)', regex: CTX_HEAD },
+    { id: 'u-inject-tsx', language: 'tsx', pattern: '$C.inject($$$ARGS)', regex: CTX_HEAD },
+    { id: 'u-inject-py', language: 'python', pattern: '$C.inject($$$ARGS)', regex: CTX_HEAD },
   ]
   return rules.map((rule) => sgRuleYaml(rule)).join('---\n')
 }
@@ -279,9 +284,12 @@ function sgRulesDoc(): string {
 function sgRuleYaml(rule: SgRule): string {
   const header = `id: ${rule.id}\nlanguage: ${rule.language}\nrule:\n`
   const base = rule.kind !== undefined ? `kind: ${rule.kind}` : `pattern: ${JSON.stringify(rule.pattern ?? '')}`
-  const withText =
-    rule.textPrefix !== undefined ? `${base}\n    - regex: ${JSON.stringify(`^${rule.textPrefix}`)}` : base
-  if (rule.notInside === undefined && rule.textPrefix === undefined) return `${header}  ${withText}\n`
+  const regexes = [
+    ...(rule.textPrefix !== undefined ? [JSON.stringify(`^${rule.textPrefix}`)] : []),
+    ...(rule.regex !== undefined ? [JSON.stringify(rule.regex)] : []),
+  ].map((regex) => `\n    - regex: ${regex}`).join('')
+  const withText = `${base}${regexes}`
+  if (rule.notInside === undefined && regexes === '') return `${header}  ${withText}\n`
   const kinds = (rule.notInside ?? []).map((kind) => `            - kind: ${kind}`).join('\n')
   const negate = rule.notInside !== undefined ? `\n    - not:\n        inside:\n          any:\n${kinds}` : ''
   return `${header}  all:\n    - ${withText}${negate}\n`
@@ -351,6 +359,7 @@ export async function check(root: string, options: CheckOptions = {}): Promise<r
   }
 
   const findings: Finding[] = []
+  const seenIds = new Map<string, string>()
   for (const abs of covered) {
     const rel = relative(root, abs).split('\\').join('/')
     const ext = extname(abs).toLowerCase()
@@ -361,7 +370,7 @@ export async function check(root: string, options: CheckOptions = {}): Promise<r
       continue
     }
     if (YAML.has(ext)) {
-      findings.push(...sgIds(rel, byRule))
+      findings.push(...sgIds(rel, byRule, seenIds))
       continue
     }
     if (SCRIPT.has(ext)) {
@@ -492,8 +501,11 @@ function indexHits(hits: readonly SgHit[]): Map<string, SgHit[]> {
   return out
 }
 
-function sgIds(rel: string, byRule: ReadonlyMap<string, readonly SgHit[]>): Finding[] {
-  const seen = new Map<string, number>()
+function sgIds(
+  rel: string,
+  byRule: ReadonlyMap<string, readonly SgHit[]>,
+  seen: Map<string, string> = new Map(),
+): Finding[] {
   const findings: Finding[] = []
   for (const hit of byRule.get('u-id') ?? []) {
     const id = meta(hit, 'ID').replace(/^['"`]|['"`]$/g, '')
@@ -505,10 +517,10 @@ function sgIds(rel: string, byRule: ReadonlyMap<string, readonly SgHit[]>): Find
         tag: 'id',
         file: rel,
         line,
-        message: `duplicate Loader id "${id}" (first at line ${prev}). insert does not dedupe.`,
+        message: `duplicate Loader id "${id}" (first at ${prev}). insert does not dedupe.`,
       })
     } else {
-      seen.set(id, line)
+      seen.set(id, `${rel}:${line}`)
     }
   }
   return findings
@@ -517,8 +529,9 @@ function sgIds(rel: string, byRule: ReadonlyMap<string, readonly SgHit[]>): Find
 /** Declared inject keys, read as data from `inject = [...]` matches. */
 function declaredKeys(byRule: ReadonlyMap<string, readonly SgHit[]>): Set<string> {
   const out = new Set<string>()
-  for (const id of ['u-decl', 'u-decl-bare', 'u-decl-js', 'u-decl-bare-js', 'u-decl-tsx', 'u-decl-bare-tsx', 'u-decl-py']) {
-    for (const hit of byRule.get(id) ?? []) {
+  for (const [id, hits] of byRule) {
+    if (!id.startsWith('u-decl')) continue
+    for (const hit of hits) {
       for (const key of keysFromValue(meta(hit, 'V'))) out.add(key)
     }
   }
@@ -531,8 +544,9 @@ function declaredKeys(byRule: ReadonlyMap<string, readonly SgHit[]>): Set<string
  */
 function injectWidens(byRule: ReadonlyMap<string, readonly SgHit[]>): Map<number, { alias: string; keys: readonly string[] }> {
   const widens = new Map<number, { alias: string; keys: readonly string[] }>()
-  for (const id of ['u-inject-ts', 'u-inject-js', 'u-inject-tsx', 'u-inject-py']) {
-    for (const hit of byRule.get(id) ?? []) {
+  for (const [id, hits] of byRule) {
+    if (!id.startsWith('u-inject')) continue
+    for (const hit of hits) {
       const text = hit.text ?? ''
       const keys = keysFromValue(/\[([^\]]*)\]/.exec(text)?.[1] ?? '')
       const alias = /\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*[,)]/.exec(text)?.[1]
@@ -546,8 +560,9 @@ function injectWidens(byRule: ReadonlyMap<string, readonly SgHit[]>): Map<number
 /** `ctx.get('key')` / `scope.get('key')` reads that never need inject. */
 function getReads(byRule: ReadonlyMap<string, readonly SgHit[]>): Set<string> {
   const reads = new Set<string>()
-  for (const id of ['u-get-ts', 'u-get-js', 'u-get-tsx', 'u-get-py']) {
-    for (const hit of byRule.get(id) ?? []) {
+  for (const [id, hits] of byRule) {
+    if (!id.startsWith('u-get')) continue
+    for (const hit of hits) {
       const arg = /\(\s*['"`]([A-Za-z_][A-Za-z0-9_]*)['"`]/.exec(hit.text ?? '')?.[1]
       if (arg !== undefined) reads.add(`${lineOf(hit)}:${arg}`)
     }
@@ -659,6 +674,7 @@ function sgMembersAndToplevel(
   // see depth, so depth stays a brace scan over ast-grep's own call lines —
   // the match set is ast-grep's, not a second engine. Bare `register(…)`
   // has no receiver; `registerX` methods match TOPLEVEL_VERB by prefix.
+  // String/comment braces would corrupt depth, so count code braces only.
   let depth = 0
   for (let index = 0; index < srcLines.length; index += 1) {
     const call = callLines.get(index + 1)
@@ -673,14 +689,38 @@ function sgMembersAndToplevel(
         message: 'effect at module load. Move it into apply(ctx) / the Service constructor.',
       })
     }
-    const line = srcLines[index] ?? ''
-    for (const ch of line) {
+    for (const ch of codeBraces(srcLines[index] ?? '')) {
       if (ch === '{' || ch === '(') depth += 1
       if (ch === '}' || ch === ')') depth -= 1
     }
     if (depth < 0) depth = 0
   }
   return findings
+}
+
+/**
+ * Yield the brace characters that are code, not string/comment text, so an
+ * unbalanced `}` inside a literal cannot corrupt the toplevel depth pass.
+ * Handles `'`, `"`, backtick strings (with `\` escapes) and `//` / `#` line
+ * comments; block comments stay counted (a backstop, not a lexer).
+ */
+function* codeBraces(line: string): Generator<string> {
+  let quote: string | undefined
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i]
+    if (quote !== undefined) {
+      if (ch === '\\') i += 1
+      else if (ch === quote) quote = undefined
+      continue
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch
+      continue
+    }
+    if (ch === '/' && line[i + 1] === '/') return
+    if (ch === '#') return
+    if (ch === '{' || ch === '(' || ch === '}' || ch === ')') yield ch
+  }
 }
 
 /** True when an enclosing ctx.inject call widens this alias+key. */

@@ -96,14 +96,17 @@ test('toplevel: ctx.effect at module load', async () => {
   )
 })
 
-test('id: duplicate Loader ids in one yaml file', async () => {
+test('id: duplicate Loader ids across yaml files', async () => {
   await withTree(
     {
-      'cordis.patch.yml': "- insert:\n    - id: foo\n      name: a\n    - id: foo\n      name: b\n",
+      'a/cordis.patch.yml': '- insert:\n    - id: foo\n      name: a\n',
+      'b/cordis.local.yml': '- insert:\n    - id: foo\n      name: b\n',
     },
     async (root) => {
       const hits = await check(root)
-      assert.equal(hits.some((h) => h.tag === 'id' && h.message.includes('foo')), true)
+      const hit = hits.find((h) => h.tag === 'id' && h.message.includes('foo'))
+      assert.ok(hit)
+      assert.match(hit.message, /first at/)
     },
   )
 })
@@ -257,10 +260,29 @@ test('skips generated and vendored dirs', async () => {
   })
 })
 
-test('this plugin is clean', async () => {
+test('toplevel: braces in strings and comments do not corrupt depth', async () => {
+  await withTree(
+    {
+      'src/a.py': 's = "{"\nctx.effect()\n',
+      'src/b.ts': 'export function apply(ctx) {\n  ctx.tools.register(() => {})\n}\n// }\nctx.effect(() => () => {})\n',
+    },
+    async (root) => {
+      const hits = await check(root, { astGrep: true })
+      const tops = hits.filter((h) => h.tag === 'toplevel').map((h) => `${h.file}:${h.line}`)
+      assert.deepEqual(tops, ['src/a.py:2', 'src/b.ts:5'])
+    },
+  )
+})
+
+test('this plugin is clean apart from its two alternative install rows', async () => {
   const { dirname } = await import('node:path')
   const { fileURLToPath } = await import('node:url')
   const root = join(dirname(fileURLToPath(import.meta.url)), '..')
   const hits = await check(root)
-  assert.deepEqual(hits, [])
+  // cordis.patch.yml vs cordis.local.yml carry the same id by design
+  // (alternative installs, never applied together); everything else is clean.
+  assert.deepEqual(
+    hits.filter((h) => !(h.tag === 'id' && h.message.includes('cordis-review'))),
+    [],
+  )
 })
