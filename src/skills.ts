@@ -9,26 +9,31 @@
 
 import { readdir, readFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
+import { BUNDLED_SKILL_RANK, isSkillName } from '@deepseek-ai/dsh-skill'
 import { parseFrontmatter } from './frontmatter.ts'
 import type {
   SkillCandidateLike,
   SkillDefinitionLike,
+  SkillInvocationPolicyLike,
+  SkillLookupOptionsLike,
   SkillProviderLike,
   SkillSummaryLike,
 } from './host.ts'
 
-/** Rank matching a harness bundled skill (600), so a project-level or user-level
- * skill of the same name still wins the duplicate. */
-export const BUNDLED_SKILL_RANK = 600
+/**
+ * Rank matching a harness bundled skill, re-exported from the registry so a
+ * project-level or user-level skill of the same name still wins the duplicate.
+ */
+export { BUNDLED_SKILL_RANK }
 
 /** Provider name inside the skill registry. */
 const PROVIDER_NAME = 'cordis-review'
 
-/** The grammar the registry enforces for skill names. */
-const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
-
 /** Instruction file every skill directory must carry. */
 const INSTRUCTION_FILE = 'SKILL.md'
+
+/** Frontmatter keys the harness defines; they project into named summary fields, never into `metadata`. */
+const SUMMARY_KEYS = new Set(['name', 'description', 'whenToUse', 'disable-model-invocation', 'user-invocable'])
 
 /** One parsed bundled skill. */
 export interface BundledSkill {
@@ -36,10 +41,14 @@ export interface BundledSkill {
   readonly name: string
   /** Routing description from frontmatter. */
   readonly description: string
+  /** Extra routing hint from frontmatter, when present. */
+  readonly whenToUse?: string
+  /** Resolved invocation controls from the documented frontmatter keys. */
+  readonly invocation: SkillInvocationPolicyLike
   /** Instruction body with frontmatter removed. */
   readonly content: string
-  /** Remaining frontmatter keys (`argument-hint`, `license`, …). */
-  readonly metadata: Readonly<Record<string, string>>
+  /** Remaining frontmatter keys (provider-specific only). */
+  readonly metadata: Readonly<Record<string, unknown>>
   /** Absolute path of the instruction file. */
   readonly path: string
   /** Absolute path of the skill directory, used as the resource base. */
@@ -58,18 +67,22 @@ export interface SkillProviderOptions {
  * Read and parse one skill file. Shared by discovery and direct loads so a
  * single file enforces the name/description/frontmatter rules everywhere.
  * @param path - absolute path of the `SKILL.md` file.
- * @param entryName - directory name fallback when frontmatter omits `name`.
  * @param onWarn - optional non-fatal problem sink.
+ * @param entryName - directory name fallback when frontmatter omits `name`.
+ * @param signal - aborts the read for a caller that no longer wants the result.
  * @returns the parsed skill, or `undefined` with a warning when invalid.
  */
 export async function readSkillFile(
   path: string,
   onWarn?: (message: string) => void,
   entryName?: string,
+  signal?: AbortSignal,
 ): Promise<BundledSkill | undefined> {
+  if (signal?.aborted) return undefined
+
   let source: string
   try {
-    source = await readFile(path, 'utf8')
+    source = await readFile(path, { encoding: 'utf8', signal })
   } catch {
     return undefined
   }
@@ -83,10 +96,10 @@ export async function readSkillFile(
   }
 
   const fallback = entryName ?? basename(path)
-  const name = (parsed.data['name'] ?? fallback).trim()
-  const description = (parsed.data['description'] ?? '').trim()
+  const name = String(parsed.data['name'] ?? fallback).trim()
+  const description = String(parsed.data['description'] ?? '').trim()
 
-  if (!SKILL_NAME.test(name)) {
+  if (!isSkillName(name)) {
     onWarn?.(`skipping ${path}: "${name}" is not a valid kebab-case skill name`)
     return undefined
   }
@@ -95,15 +108,22 @@ export async function readSkillFile(
     return undefined
   }
 
-  const metadata: Record<string, string> = {}
+  const metadata: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(parsed.data)) {
-    if (key === 'name' || key === 'description') continue
+    if (SUMMARY_KEYS.has(key)) continue
     metadata[key] = value
   }
+
+  const whenToUse = String(parsed.data['whenToUse'] ?? '').trim()
 
   return {
     name,
     description,
+    ...whenToUse === '' ? {} : { whenToUse },
+    invocation: {
+      modelInvocable: parsed.data['disable-model-invocation'] !== true,
+      userInvocable: parsed.data['user-invocable'] !== false,
+    },
     content: parsed.body.trim(),
     metadata,
     path,
@@ -120,26 +140,32 @@ export async function readSkillFile(
  * other skills.
  * @param skillsDir - directory holding one subdirectory per skill.
  * @param onWarn - optional non-fatal problem sink.
+ * @param signal - aborts discovery for a caller that no longer wants the result.
  * @returns the parsed skills, sorted by name.
  */
 export async function discoverSkills(
   skillsDir: string,
   onWarn?: (message: string) => void,
+  signal?: AbortSignal,
 ): Promise<readonly BundledSkill[]> {
+  if (signal?.aborted) return []
+
   let entries
   try {
     entries = await readdir(skillsDir, { withFileTypes: true })
   } catch (error) {
+    if (signal?.aborted) return []
     onWarn?.(`cannot read skills directory ${skillsDir}: ${error instanceof Error ? error.message : String(error)}`)
     return []
   }
 
   const skills: BundledSkill[] = []
   for (const entry of entries) {
+    if (signal?.aborted) break
     if (!entry.isDirectory()) continue
 
     const path = join(skillsDir, entry.name, INSTRUCTION_FILE)
-    const skill = await readSkillFile(path, onWarn, entry.name)
+    const skill = await readSkillFile(path, onWarn, entry.name, signal)
     if (skill !== undefined) skills.push(skill)
   }
 
@@ -156,7 +182,8 @@ export function createSkillProvider(options: SkillProviderOptions): SkillProvide
     path: skill.path,
     name: skill.name,
     description: skill.description,
-    invocation: { modelInvocable: true, userInvocable: true },
+    ...skill.whenToUse === undefined ? {} : { whenToUse: skill.whenToUse },
+    invocation: skill.invocation,
     source: 'bundled',
     provider: PROVIDER_NAME,
     resourceBase: { kind: 'directory', path: skill.directory },
@@ -165,8 +192,8 @@ export function createSkillProvider(options: SkillProviderOptions): SkillProvide
   return {
     name: PROVIDER_NAME,
 
-    async list(): Promise<readonly SkillCandidateLike[]> {
-      const skills = await discoverSkills(options.skillsDir, options.onWarn)
+    async list(lookup?: SkillLookupOptionsLike): Promise<readonly SkillCandidateLike[]> {
+      const skills = await discoverSkills(options.skillsDir, options.onWarn, lookup?.signal)
       return skills.map((skill) => ({
         ...summaryOf(skill),
         rank: BUNDLED_SKILL_RANK,
@@ -175,13 +202,16 @@ export function createSkillProvider(options: SkillProviderOptions): SkillProvide
       }))
     },
 
-    async get(candidate: SkillCandidateLike): Promise<SkillDefinitionLike | undefined> {
+    async get(
+      candidate: SkillCandidateLike,
+      lookup?: SkillLookupOptionsLike,
+    ): Promise<SkillDefinitionLike | undefined> {
       if (typeof candidate.locator !== 'string') return undefined
 
       // Read the locator directly: one file instead of a full re-discovery.
       // The name check keeps a stale candidate (path reused by another skill)
       // from loading under the wrong identity.
-      const skill = await readSkillFile(candidate.locator, options.onWarn)
+      const skill = await readSkillFile(candidate.locator, options.onWarn, undefined, lookup?.signal)
       if (skill === undefined || skill.name !== candidate.name) return undefined
 
       return { ...summaryOf(skill), content: skill.content, metadata: skill.metadata }

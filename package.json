@@ -1,31 +1,57 @@
 {
   "name": "dsh-cordis-review",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
   "description": "CORDIS review slash command (/cordis-review) for DeepSeek Harness: review a codebase against arXiv:2608.25512 and apply the applicable fixes.",
   "license": "MIT",
+  "bin": {
+    "cordis-review-check": "lib/cli.js"
+  },
   "exports": {
-    ".": "./src/index.ts",
-    "./check": "./src/check.ts",
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./check": {
+      "types": "./lib/types/check.d.ts",
+      "default": "./lib/check.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
   "files": [
-    "src",
+    "lib/index.js",
+    "lib/check.js",
+    "lib/cli.js",
+    "lib/types/**/*.d.ts",
     "skills",
     "cordis.patch.yml",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "test": "node --test tests/*.test.ts",
     "typecheck": "tsc -p tsconfig.json",
-    "check": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/cli.ts"
+    "check": "node lib/cli.js"
   },
   "engines": {
-    "node": ">=22.6.0"
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-skill": "0.1.6-alpha.1",
+    "yaml": "2.9.1"
   },
   "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
     "@types/node": "^22.20.2",
     "typescript": "^7.0.2"
   }

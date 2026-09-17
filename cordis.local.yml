@@ -3,4 +3,4 @@
 # into ~/.dsh/profiles/<profile>/cordis.patch.yml instead.
 - insert:
     - id: cordis-review
-      name: '/home/maci/dsh-cordis-review/src/index.ts'
+      name: '/home/maci/dsh-plugins/dsh-cordis-review/src/index.ts'

@@ -15,6 +15,14 @@
 /** Disposer returned by every host registration. */
 export type Disposable = () => void
 
+/** Caller context for one provider lookup: workspace selector plus cancellation. */
+export interface SkillLookupOptionsLike {
+  /** Workspace selector for a cwd-sensitive provider; unused here. */
+  readonly cwd?: string
+  /** Aborts discovery or loading work for the current caller. */
+  readonly signal?: AbortSignal
+}
+
 /** Invocation controls carried by every skill summary. */
 export interface SkillInvocationPolicyLike {
   /** Whether model-facing catalogs and the `skill` tool include this skill. */
@@ -31,6 +39,8 @@ export interface SkillSummaryLike {
   readonly name: string
   /** Short routing description. */
   readonly description: string
+  /** Extra routing hint, when frontmatter carries one. */
+  readonly whenToUse?: string
   /** Resolved invocation controls. */
   readonly invocation: SkillInvocationPolicyLike
   /** Discovery source bucket. */
@@ -64,9 +74,9 @@ export interface SkillProviderLike {
   /** Unique provider name in the registry. */
   readonly name: string
   /** List candidates for the current lookup. */
-  list(): Promise<readonly SkillCandidateLike[]>
+  list(options?: SkillLookupOptionsLike): Promise<readonly SkillCandidateLike[]>
   /** Load a winning candidate's body, or `undefined` when it is gone. */
-  get(candidate: SkillCandidateLike): Promise<SkillDefinitionLike | undefined>
+  get(candidate: SkillCandidateLike, options?: SkillLookupOptionsLike): Promise<SkillDefinitionLike | undefined>
 }
 
 /** Host context this plugin actually calls. */
