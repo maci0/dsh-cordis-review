@@ -1,105 +1,122 @@
 # dsh-cordis-review
 
-**`/cordis-review` for DeepSeek Harness: review a codebase against the CORDIS context paradigm and apply the applicable fixes.**
+`/cordis-review` in the composer. The agent reads your workspace, maps it onto the CORDIS context paradigm, and **patches** what violates it — a report alone is a failed run.
+
+```
+/cordis-review
+```
 
 Paper: [A Programming Paradigm for Spatiotemporal Composability](https://arxiv.org/abs/2608.25512) (Shi, Zhang, Cui; arXiv:2608.25512).
 
-| Capability | Extension point | Effect |
-|---|---|---|
-| `/cordis-review` | `ctx.skills.registerProvider()` | The bundled `cordis-review` skill loads through the `skill` tool and appears as `/cordis-review` in the composer — DSH's command surface for user-invocable skills. The agent reviews the workspace against the paper and implements every applicable fix. |
+## What you get
 
-The skill body in `skills/cordis-review/SKILL.md` is the product. A closed-form checker (`src/check.ts`, built to `lib/check.js`) prints the four tags that are grammar, not judgment (`mix-export`, `inject`, `toplevel`, `id`) — every tag is one ast-grep query. Without `ast-grep` on PATH each covered file warns on stderr and yields an LLM-fallback hit for the review agent to judge; Zig (no ast-grep grammar) always takes that path. Inverse/leak/hmr/boundary stay with the agent.
+- **One command, one product.** `/cordis-review` loads the bundled skill body through the skill registry and lands in the `/` menu as DSH's command surface for user-invocable skills. Workspace defaults to the current one; `/cordis-review <path>` scopes it.
+- **A rubric that ships with the plugin.** `skills/cordis-review/SKILL.md` is the operationalised checklist: temporal composability (every mutation has an inverse the runtime holds), spatial composability (dependencies declared and reactively managed), the context paradigm (no leaked `ctx`), and the §6.1 system boundary. No fetch is required before auditing.
+- **Patches, not advice.** The skill instructs the agent to fix every applicable hit, grep the callers of anything it touches, fix the shared primitive, and leave one dispose test per registration it adds or repairs. Hits outside the system boundary are skipped with a one-line reason.
+- **A closed-form checker.** `cordis-review-check` prints the four tags that are grammar rather than judgment — `mix-export`, `inject`, `toplevel`, `id`. Every tag is an ast-grep query over JS/TS/TSX, Python, Go, C, C++, Java, Rust, YAML, Lua, Swift, Scala, Dart, Kotlin, Ruby, PHP, C#, Elixir, and Zig.
+- **A real fallback path.** No `ast-grep` on PATH, or a Zig file (the binary ships no Zig grammar), means each covered file warns on stderr and yields an LLM-fallback hit for the review agent to judge. `leak`, `inverse`, `hmr`, and `boundary` stay with the agent by design.
+- **Honest frontmatter handling.** Skill frontmatter is parsed with `yaml`, so block scalars and nested maps behave as the registry expects. The documented invocation keys (`user-invocable`, `disable-model-invocation`) and `whenToUse` project into the registry's summary; unknown keys stay in `metadata`.
+
+On DeepSeek Harness and `dsh-*` plugins the paper maps onto existing names: `ctx.effect`, `inject`, `ctx.get`, `apply`, HMR-safety tests.
 
 ## Install
 
-Install: the package ships a built `lib/` and declares `dsh.bundle`, so `dsh plugin add` activates its layer — `dsh.profile.bundles` is frozen at boot, so restart the profile after an install or remove. `cordis.patch.yml` holds the Loader row the bundle contributes.
-
 ```sh
-dsh plugin --profile web add /path/to/dsh-cordis-review
+dsh plugin --profile web add github:maci0/dsh-cordis-review
+dsh plugin --profile web update dsh-cordis-review   # refresh later
 ```
 
-No manual profile patch edit is needed; `cordis.patch.yml` in this package is the layer.
+Then **restart `dsh web`**: bundle layers compose at boot, and `dsh.profile.bundles` is frozen there.
 
-A second `add` of the same spec is a no-op. Uninstall with the **package name**, not the git specifier:
+The package declares `dsh.bundle` and ships a built `lib/`, so `dsh plugin add` activates its layer. Do not also paste the `id: cordis-review` row into your profile's `cordis.patch.yml` — `insert` does not dedupe ids, so the plugin would mount twice. Override the row's `config` from your profile instead.
+
+Uninstall with the **package name**:
 
 ```sh
 dsh plugin --profile web remove dsh-cordis-review
 ```
 
-`remove github:…` is `pnpm remove github:…`, and pnpm looks up the argument as a dependency key — it is not there, so it fails with `ERR_PNPM_CANNOT_REMOVE_MISSING_DEPS` even though the plugin is installed. The `allowBuilds` hint that follows is leftover CLI copy for a failed git `add`; ignore it.
+`remove github:…` is `pnpm remove github:…`, and pnpm resolves the argument as a dependency key — it is not there, so the command fails with `ERR_PNPM_CANNOT_REMOVE_MISSING_DEPS` even though the plugin is installed.
 
-Skill-only (no plugin row): DSH already watches `~/.dsh/skills`.
+Skill-only install, without the plugin row (DSH already watches `~/.dsh/skills`):
 
 ```sh
 mkdir -p ~/.dsh/skills
 ln -s /path/to/dsh-cordis-review/skills/cordis-review ~/.dsh/skills/cordis-review
 ```
 
-Edits to the skill body load on the next `/cordis-review`. A user-level skill of the same name outranks a plugin-provided copy (rank 400 vs 600).
+Edits then load on the next `/cordis-review`. A user- or project-level skill of the same name outranks the bundled copy.
 
-Local overlay for a one-shot boot (absolute path required):
+## Commands
 
-```sh
-pnpm dsh web --patch /path/to/dsh-cordis-review/cordis.local.yml
-```
+| Command | What it runs |
+|---|---|
+| `/cordis-review` | Reviews the current workspace against CORDIS and implements every applicable fix. |
+| `/cordis-review <path>` | Same audit, scoped to `<path>`. |
+| `cordis-review-check [root]` | Prints `file:line: tag: message` per closed-form hit, or `cordis-check: clean`. The package exposes it as the `cordis-review-check` bin. |
 
-### Verify
+Checker flags:
 
-After the profile patch save (and a **page refresh** of the Web client the first time):
+- `--grammar-config <path>` — forwards an `sgconfig.yml` registering custom grammars (for example Zig).
+- `--ast-grep` — forces the engine on; fails when the binary is missing.
+- `--no-ast-grep` — never runs ast-grep; every covered file takes the LLM-fallback path.
+- `-h`, `--help` — prints the usage.
 
-- `/cordis-review` is in the `/` menu;
-- invoking it injects the CORDIS review instructions and the agent starts the audit.
+Exit status: **0** clean, **1** findings, **2** usage or path error. An unknown flag, a missing flag value, or a root that is not an existing directory exits 2 with a one-line `cordis-check:` message on stderr.
 
-## What it does
+## How a run goes
 
-The skill tells the agent to:
+1. **Scope** — the current workspace, or the path argument.
+2. **Get the rules** — the skill's own checklist, plus the repo's `AGENTS.md` / `docs/cordis-primer.md` in DSH workspaces.
+3. **Map the runtime** — context object, effect primitives, entrypoints, loader.
+4. **Closed-form pass** — run the checker first.
+5. **Audit, then fix** — each hit becomes a code change unless it is a documented outside-boundary emission.
+6. **Verify** — dispose the contributing fiber and assert the contribution is gone; re-run the checker.
 
-1. Use its own bundled checklist as the rubric — `SKILL.md` ships the
-   operationalized rules, so the review never depends on a fetch. The abs page
-   `arxiv.org/abs/2608.25512` works if the abstract is wanted; the PDF is not
-   decodable here and no HTML rendering exists for this submission.
-2. Map the workspace onto CORDIS (context, revertible effects, reactive coeffects, loader/fibers).
-3. Audit against temporal composability (every mutation has an inverse the runtime holds), spatial composability (dependencies declared and reactively managed), and the context paradigm (no leaked `ctx`).
-4. **Implement** every applicable fix. Report-only is failure. Hits outside the system boundary (§6.1) are skipped with a one-line reason.
+A clean checker is not a pass. The runtime does not prove that an inverse actually reverts, or that operations published at one key commute — those are author obligations, and this review discharges them in code.
 
-On DeepSeek Harness / `dsh-*` plugins the paper maps onto existing names: `ctx.effect`, `inject`, `ctx.get`, `apply`, HMR-safety tests.
+## Configure
 
-## Configuration
+None. The Loader row carries no `config`. The only knobs are the skill frontmatter keys:
 
-None. The Loader row has no `config`.
+| Key | Default | Meaning |
+|---|---|---|
+| `name` | directory name | Kebab-case skill name; must be valid or the file is skipped. |
+| `description` | — | Required. Empty description means the skill is skipped with a warning. |
+| `whenToUse` | unset | Extra routing hint, projected into the registry summary. |
+| `disable-model-invocation` | `false` | `true` keeps the model from invoking the skill on its own. |
+| `user-invocable` | `true` | `false` removes `/cordis-review` from the command surface. |
 
-## Uninstall
+Provider-specific keys survive in `metadata`. One broken skill file is skipped with a warning; it never costs the catalog its other skills.
 
-```sh
-dsh plugin --profile web remove dsh-cordis-review
-```
+## Limits
 
-and delete the `id: cordis-review` row from `~/.dsh/profiles/<profile>/cordis.patch.yml`, if you added one there. The row this package contributes lives in its own `cordis.patch.yml` bundle layer; `remove` drops that layer from `dsh.profile.bundles`.
-
-## Checker
-
-One engine: every tag is an ast-grep query over JS/TS, Python, Go, C, C++, Java, Rust, and YAML. Without `ast-grep` on PATH each covered file warns on stderr and yields an LLM-fallback hit for the review agent to judge. Zig has no ast-grep grammar and always takes that path. Inverse/leak/hmr/boundary stay with the agent.
-
-```sh
-npm run check            # this checkout
-npm run check -- /path   # another tree
-```
-
-Flags: `--grammar-config <path>` forwards an `sgconfig.yml` registering custom grammars (for example `zig`); `--ast-grep` forces the engine on and fails when the binary is missing; `--no-ast-grep` never runs ast-grep, so every covered file takes the LLM-fallback path; `--help` prints the usage. An unknown flag, a missing flag value, or a root that is not an existing directory exits non-zero with a one-line `cordis-check:` message.
-
-Prints `file:line: tag: message` or `cordis-check: clean`. Exit 1 on hits, 2 on a usage or path error.
+- **The checker proves four tags, nothing more.** It is not a correctness oracle and not a substitute for the checklist. Inverse, leak, HMR, and boundary findings come from the agent's judgment.
+- **Without `ast-grep`, every covered file becomes a judgment call.** Install the binary for deterministic results; Zig always takes the fallback unless you supply a grammar config.
+- **The paper is not fetched by default, and the PDF is not usable.** The abs page is the one fetchable URL; the checklist in the skill body is the rubric.
+- **Host source edits remount only with `id: hmr` enabled** and this checkout in `config.root`. There is no browser chrome.
 
 ## Development
 
+TypeScript built to `lib/`; the tests run from source through Node's type stripping, so no build is needed to test.
+
 ```sh
-npm test            # node --test tests/*.test.ts (Node >= 22.19, no build needed for tests)
+npm test            # node --test tests/*.test.ts (Node >= 22.19)
 npm run typecheck   # tsc --noEmit
 npm run build       # tsc -p tsconfig.build.json -> lib/
 npm run check       # scan this checkout (runs the built lib/cli.js)
 ```
 
-Host source edits remount when the profile's `id: hmr` row is enabled with this checkout in `config.root`. Browser chrome is none.
+Coverage: every checker tag against real fixtures, the Zig grammar-config path, CLI flag parsing, help, and each non-zero exit, frontmatter block scalars and chomping, skill discovery tolerating a broken sibling, abort settling promptly, and a real Cordis composition that mounts the skill provider and disposes it.
 
-## License
+`npm run check` on this checkout exits 1 on purpose: `cordis.patch.yml` and `cordis.local.yml` both carry an `id: cordis-review` row, so the checker reports the duplicate Loader id. That is the finding it is supposed to report.
+
+For a one-shot boot without installing:
+
+```sh
+pnpm dsh web --patch /path/to/dsh-cordis-review/cordis.local.yml
+```
+
+## Licence
 
 MIT. Review criteria derived from arXiv:2608.25512; the paper is not redistributed.
