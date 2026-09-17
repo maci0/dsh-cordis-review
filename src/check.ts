@@ -218,13 +218,13 @@ const CTX_HEAD = '^\\$?(ctx|scope|hostCtx|context)\\b'
  */
 /** Rule doc for one language only; undefined when no rule serves it. */
 function sgRulesDocFor(withZig: boolean, lang: string): string | undefined {
-  const rules = sgRules(withZig).filter((rule) => rule.language === lang)
+  const rules = sgRules(withZig, lang)
   if (rules.length === 0) return undefined
   return rules.map((rule) => sgRuleYaml(rule)).join('---\n')
 }
 
-function sgRules(withZig: boolean): SgRule[] {
-  return [
+function sgRules(withZig: boolean, lang?: string): SgRule[] {
+  const all: SgRule[] = [
     // yaml ids
     { id: 'u-id', language: 'yaml', pattern: 'id: $ID' },
     // JS/TS mix-export
@@ -331,6 +331,7 @@ function sgRules(withZig: boolean): SgRule[] {
     { id: 'u-inject-tsx', language: 'tsx', pattern: '$C.inject($$$ARGS)', regex: CTX_HEAD },
     { id: 'u-inject-py', language: 'python', pattern: '$C.inject($$$ARGS)', regex: CTX_HEAD },
   ]
+  return lang === undefined ? all : all.filter((rule) => rule.language === lang)
 }
 
 function sgRuleYaml(rule: SgRule): string {
