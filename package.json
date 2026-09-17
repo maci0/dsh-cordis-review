@@ -1,6 +1,6 @@
 {
   "name": "dsh-cordis-review",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": true,
   "type": "module",
   "main": "lib/index.js",
@@ -28,9 +28,7 @@
     }
   },
   "files": [
-    "lib/index.js",
-    "lib/check.js",
-    "lib/cli.js",
+    "lib/**/*.js",
     "lib/types/**/*.d.ts",
     "skills",
     "cordis.patch.yml",
