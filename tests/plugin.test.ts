@@ -73,6 +73,9 @@ test('apply registers one skills provider when skills is injected', async () => 
   assert.match(loaded.content, /Temporal composability/)
   assert.match(loaded.content, /Spatial composability/)
   assert.match(loaded.content, /Closed-form pass/)
+
+  const stale = await provider.get({ ...skill, name: 'other-skill' })
+  assert.equal(stale, undefined)
 })
 
 test('dispose of inject removes the skills provider', () => {

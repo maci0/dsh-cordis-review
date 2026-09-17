@@ -8,7 +8,7 @@
  */
 
 import { readdir, readFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { parseFrontmatter } from './frontmatter.ts'
 import type {
   SkillCandidateLike,
@@ -55,6 +55,63 @@ export interface SkillProviderOptions {
 }
 
 /**
+ * Read and parse one skill file. Shared by discovery and direct loads so a
+ * single file enforces the name/description/frontmatter rules everywhere.
+ * @param path - absolute path of the `SKILL.md` file.
+ * @param entryName - directory name fallback when frontmatter omits `name`.
+ * @param onWarn - optional non-fatal problem sink.
+ * @returns the parsed skill, or `undefined` with a warning when invalid.
+ */
+export async function readSkillFile(
+  path: string,
+  onWarn?: (message: string) => void,
+  entryName?: string,
+): Promise<BundledSkill | undefined> {
+  let source: string
+  try {
+    source = await readFile(path, 'utf8')
+  } catch {
+    return undefined
+  }
+
+  let parsed: ReturnType<typeof parseFrontmatter>
+  try {
+    parsed = parseFrontmatter(source)
+  } catch (error) {
+    onWarn?.(`skipping ${path}: ${error instanceof Error ? error.message : String(error)}`)
+    return undefined
+  }
+
+  const fallback = entryName ?? basename(path)
+  const name = (parsed.data['name'] ?? fallback).trim()
+  const description = (parsed.data['description'] ?? '').trim()
+
+  if (!SKILL_NAME.test(name)) {
+    onWarn?.(`skipping ${path}: "${name}" is not a valid kebab-case skill name`)
+    return undefined
+  }
+  if (description === '') {
+    onWarn?.(`skipping ${path}: frontmatter has no description`)
+    return undefined
+  }
+
+  const metadata: Record<string, string> = {}
+  for (const [key, value] of Object.entries(parsed.data)) {
+    if (key === 'name' || key === 'description') continue
+    metadata[key] = value
+  }
+
+  return {
+    name,
+    description,
+    content: parsed.body.trim(),
+    metadata,
+    path,
+    directory: dirname(path),
+  }
+}
+
+/**
  * Read every valid skill directory under `skillsDir`.
  *
  * A missing directory, a directory without `SKILL.md`, a file whose frontmatter
@@ -82,47 +139,8 @@ export async function discoverSkills(
     if (!entry.isDirectory()) continue
 
     const path = join(skillsDir, entry.name, INSTRUCTION_FILE)
-    let source: string
-    try {
-      source = await readFile(path, 'utf8')
-    } catch {
-      continue
-    }
-
-    let parsed: ReturnType<typeof parseFrontmatter>
-    try {
-      parsed = parseFrontmatter(source)
-    } catch (error) {
-      onWarn?.(`skipping ${path}: ${error instanceof Error ? error.message : String(error)}`)
-      continue
-    }
-
-    const name = (parsed.data['name'] ?? entry.name).trim()
-    const description = (parsed.data['description'] ?? '').trim()
-
-    if (!SKILL_NAME.test(name)) {
-      onWarn?.(`skipping ${path}: "${name}" is not a valid kebab-case skill name`)
-      continue
-    }
-    if (description === '') {
-      onWarn?.(`skipping ${path}: frontmatter has no description`)
-      continue
-    }
-
-    const metadata: Record<string, string> = {}
-    for (const [key, value] of Object.entries(parsed.data)) {
-      if (key === 'name' || key === 'description') continue
-      metadata[key] = value
-    }
-
-    skills.push({
-      name,
-      description,
-      content: parsed.body.trim(),
-      metadata,
-      path,
-      directory: dirname(path),
-    })
+    const skill = await readSkillFile(path, onWarn, entry.name)
+    if (skill !== undefined) skills.push(skill)
   }
 
   return skills.sort((left, right) => left.name.localeCompare(right.name))
@@ -160,13 +178,13 @@ export function createSkillProvider(options: SkillProviderOptions): SkillProvide
     async get(candidate: SkillCandidateLike): Promise<SkillDefinitionLike | undefined> {
       if (typeof candidate.locator !== 'string') return undefined
 
-      const skills = await discoverSkills(options.skillsDir, options.onWarn)
-      const found = skills.find(
-        (skill) => skill.path === candidate.locator && skill.name === candidate.name,
-      )
-      if (found === undefined) return undefined
+      // Read the locator directly: one file instead of a full re-discovery.
+      // The name check keeps a stale candidate (path reused by another skill)
+      // from loading under the wrong identity.
+      const skill = await readSkillFile(candidate.locator, options.onWarn)
+      if (skill === undefined || skill.name !== candidate.name) return undefined
 
-      return { ...summaryOf(found), content: found.content, metadata: found.metadata }
+      return { ...summaryOf(skill), content: skill.content, metadata: skill.metadata }
     },
   }
 }

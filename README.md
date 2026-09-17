@@ -96,13 +96,12 @@ npm run check -- /path   # another tree
 
 Prints `file:line: tag: message` or `cordis-check: clean`. Exit 1 on hits.
 
-## Develop
+## Development
 
 ```sh
-cd ~/dsh-cordis-review
-npm test
-npx tsc -p tsconfig.json
-npm run check
+npm test            # node --test tests/*.test.ts (Node >= 22.6, no build step)
+npm run typecheck   # tsc --noEmit
+npm run check       # scan this checkout
 ```
 
 Host source edits remount when the profile's `id: hmr` row is enabled with this checkout in `config.root`. Browser chrome is none.
