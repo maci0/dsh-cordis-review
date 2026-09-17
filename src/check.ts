@@ -134,9 +134,53 @@ function isSkippedDir(part: string): boolean {
   ) // pip / CLion output
 }
 
-const SCRIPT = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'])
-const YAML = new Set(['.yml', '.yaml'])
-const POLYGLOT = new Set(['.py', '.pyi', '.go', '.c', '.h', '.cc', '.cpp', '.cxx', '.hpp', '.hh', '.java', '.rs', '.lua', '.swift', '.scala', '.dart', '.kt', '.kts', '.rb', '.php', '.cs', '.ex', '.exs'])
+/**
+ * ast-grep language per file extension. One map serves both jobs: it is the
+ * coverage set (`check` reads a file only when its extension appears here) and
+ * the grouping that routes each file to the id / script / polyglot pass.
+ * `.zig` is the one special case: it appears here for the grammar-config path,
+ * but the coverage loop handles it explicitly because the shipped binary has
+ * no Zig grammar.
+ */
+const LANGUAGE: Record<string, string> = {
+  '.ts': 'typescript',
+  '.mts': 'typescript',
+  '.cts': 'typescript',
+  '.tsx': 'tsx',
+  '.js': 'javascript',
+  '.jsx': 'javascript',
+  '.mjs': 'javascript',
+  '.cjs': 'javascript',
+  '.yml': 'yaml',
+  '.yaml': 'yaml',
+  '.py': 'python',
+  '.pyi': 'python',
+  '.go': 'go',
+  '.c': 'c',
+  '.h': 'c',
+  '.cc': 'cpp',
+  '.cpp': 'cpp',
+  '.cxx': 'cpp',
+  '.hpp': 'cpp',
+  '.hh': 'cpp',
+  '.java': 'java',
+  '.rs': 'rust',
+  '.lua': 'lua',
+  '.swift': 'swift',
+  '.scala': 'scala',
+  '.dart': 'dart',
+  '.kt': 'kotlin',
+  '.kts': 'kotlin',
+  '.rb': 'ruby',
+  '.php': 'php',
+  '.cs': 'csharp',
+  '.ex': 'elixir',
+  '.exs': 'elixir',
+  '.zig': 'zig',
+}
+
+/** Languages whose files carry the JS/TS tags (mix-export plus member passes). */
+const SCRIPT_LANGUAGES = new Set(['typescript', 'tsx', 'javascript'])
 /** Extensions whose text is read before scanning (only to skip browser bundles). */
 const SKIPPABLE = new Set(['.js', '.jsx', '.mjs', '.cjs'])
 
@@ -167,7 +211,9 @@ const CTX_INTRINSICS = new Set([
   'waterfall',
 ])
 
-const CTX_ALIAS = /^(ctx|scope|hostCtx|context)$/
+/** Every alias a Cordis context is bound to in the languages this checker reads. */
+const CTX_ALT = '(ctx|scope|hostCtx|context)'
+const CTX_ALIAS = new RegExp(`^${CTX_ALT}$`)
 const TOPLEVEL_VERB = /^(effect|on|set|plugin|register)/
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/
 /**
@@ -184,7 +230,7 @@ const NONTS_KEY = /^[A-Za-z][A-Za-z0-9]*$/
  * dereference. A service is a namespace called into (`ctx.jobs.run()`); a
  * bare `ctx.snapshot()` is a method call, not a coeffect.
  */
-const CONTINUED = /(?:^|[^\w$])\$?(ctx|scope|hostCtx|context)\s*(?:\.|->)\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\.|->)/
+const CONTINUED = new RegExp(`(?:^|[^\\w$])\\$?${CTX_ALT}\\s*(?:\\.|->)\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(?:\\.|->)`)
 const CONTINUED_G = new RegExp(CONTINUED.source, 'g')
 function continuedAccess(line: string, alias: string, key: string): boolean {
   CONTINUED_G.lastIndex = 0
@@ -208,8 +254,13 @@ interface SgRule {
   readonly notInside?: readonly string[]
 }
 
+/** `alias.member` / `alias->member` anywhere in a text; alias and member are groups 1-2. */
+const MEMBER = new RegExp(`(?:^|[^\\w$])\\$?${CTX_ALT}\\s*(?:\\.|->)\\s*([A-Za-z_][A-Za-z0-9_]*)`)
+/** {@link MEMBER} restricted to a call: `alias.member(`. */
+const MEMBER_CALL = new RegExp(`${MEMBER.source}\\s*\\(`)
+
 /** Prune non-`ctx` matches inside the engine: member/call/get/inject texts start at the receiver. */
-const CTX_HEAD = '^\\$?(ctx|scope|hostCtx|context)\\b'
+const CTX_HEAD = `^\\$?${CTX_ALT}\\b`
 
 /**
  * Single multi-language rule document. Rule order is load-bearing only for
@@ -357,11 +408,16 @@ function sgOrThrow(rel: string): never {
 }
 
 /** LLM-fallback handoff: the review agent judges the file against the checklist. */
-function llmFallback(ext: string): string {
-  return (
-    `ast-grep covers no ${ext} grammar here (LLM fallback): judge this file against the CORDIS checklist yourself — ` +
-    `ctx.* service reads need inject, module-load effects belong in apply(ctx).`
-  )
+function fallback(rel: string, ext: string): Finding {
+  warn(`${rel}: no ast-grep verdict for ${ext}. LLM fallback: judge this file against the CORDIS checklist yourself.`)
+  return {
+    tag: 'inject',
+    file: rel,
+    line: 1,
+    message:
+      `ast-grep covers no ${ext} grammar here (LLM fallback): judge this file against the CORDIS checklist yourself — ` +
+      `ctx.* service reads need inject, module-load effects belong in apply(ctx).`,
+  }
 }
 
 /**
@@ -387,16 +443,17 @@ export async function check(root: string, options: CheckOptions = {}): Promise<r
     const ext = extname(abs).toLowerCase()
     if (isTestPath(rel)) continue
     if (abs.endsWith('.d.ts')) continue
-    if (YAML.has(ext) || SCRIPT.has(ext) || POLYGLOT.has(ext)) {
-      const text = SKIPPABLE.has(ext) ? await readFile(abs, 'utf8') : undefined
-      if (text !== undefined && text.includes('__ModuleLoader__')) continue
-      covered.push(abs)
-    } else if (ext === '.zig') {
+    if (ext === '.zig') {
       // Custom grammars (via `grammarConfig`) make zig scannable; without
       // one there is no grammar, so keep the LLM-fallback path.
       if (options.grammarConfig !== undefined) covered.push(abs)
       else zig.push(abs)
+      continue
     }
+    if (LANGUAGE[ext] === undefined) continue
+    const text = SKIPPABLE.has(ext) ? await readFile(abs, 'utf8') : undefined
+    if (text !== undefined && text.includes('__ModuleLoader__')) continue
+    covered.push(abs)
   }
 
   // Single scan spawn for the whole tree; per-file grouping below is just
@@ -420,16 +477,16 @@ export async function check(root: string, options: CheckOptions = {}): Promise<r
     const rel = relative(root, abs).split('\\').join('/')
     const ext = extname(abs).toLowerCase()
     const byRule = indexHits(byFile.get(abs) ?? [])
+    const language = LANGUAGE[ext]
     if (!wantSg) {
-      warn(`${rel}: ast-grep off or unavailable for ${ext}. LLM fallback: judge this file against the CORDIS checklist yourself.`)
-      findings.push({ tag: 'inject', file: rel, line: 1, message: llmFallback(ext) })
+      findings.push(fallback(rel, ext))
       continue
     }
-    if (YAML.has(ext)) {
+    if (language === 'yaml') {
       findings.push(...sgIds(rel, byRule, seenIds))
       continue
     }
-    if (SCRIPT.has(ext)) {
+    if (language !== undefined && SCRIPT_LANGUAGES.has(language)) {
       const text = await readFile(abs, 'utf8')
       findings.push(...sgScript(rel, byRule, text))
       continue
@@ -438,9 +495,7 @@ export async function check(root: string, options: CheckOptions = {}): Promise<r
   }
   for (const abs of zig) {
     const rel = relative(root, abs).split('\\').join('/')
-    const ext = extname(abs).toLowerCase()
-    warn(`${rel}: no ast-grep grammar for ${ext}. LLM fallback: judge this file against the CORDIS checklist yourself.`)
-    findings.push({ tag: 'inject', file: rel, line: 1, message: llmFallback(ext) })
+    findings.push(fallback(rel, extname(abs).toLowerCase()))
   }
 
   return findings.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.tag.localeCompare(b.tag))
@@ -500,68 +555,6 @@ function sgScanAll(files: readonly string[], grammarConfig?: string): SgHit[] | 
   return out
 }
 
-/** ast-grep language per file extension; unknown extensions take no rules. */
-function scanLanguage(ext: string): string | undefined {
-  switch (ext) {
-    case '.ts':
-    case '.mts':
-    case '.cts':
-      return 'typescript'
-    case '.js':
-    case '.jsx':
-    case '.mjs':
-    case '.cjs':
-      return 'javascript'
-    case '.tsx':
-      return 'tsx'
-    case '.yml':
-    case '.yaml':
-      return 'yaml'
-    case '.py':
-    case '.pyi':
-      return 'python'
-    case '.go':
-      return 'go'
-    case '.c':
-    case '.h':
-      return 'c'
-    case '.cc':
-    case '.cpp':
-    case '.cxx':
-    case '.hpp':
-    case '.hh':
-      return 'cpp'
-    case '.java':
-      return 'java'
-    case '.rs':
-      return 'rust'
-    case '.lua':
-      return 'lua'
-    case '.swift':
-      return 'swift'
-    case '.scala':
-      return 'scala'
-    case '.dart':
-      return 'dart'
-    case '.kt':
-    case '.kts':
-      return 'kotlin'
-    case '.rb':
-      return 'ruby'
-    case '.php':
-      return 'php'
-    case '.cs':
-      return 'csharp'
-    case '.ex':
-    case '.exs':
-      return 'elixir'
-    case '.zig':
-      return 'zig'
-    default:
-      return undefined
-  }
-}
-
 /** One bounded `ast-grep scan` spawn. */
 function sgScanBatch(files: readonly string[], grammarConfig?: string): SgHit[] | undefined {
   // One spawn per language present: the engine evaluates every rule in the
@@ -569,7 +562,7 @@ function sgScanBatch(files: readonly string[], grammarConfig?: string): SgHit[] 
   // linear in rule count. Per-language docs keep each spawn's rule set small.
   const byLang = new Map<string, string[]>()
   for (const file of files) {
-    const lang = scanLanguage(extname(file).toLowerCase())
+    const lang = LANGUAGE[extname(file).toLowerCase()]
     if (lang === undefined) continue
     const list = byLang.get(lang)
     if (list === undefined) byLang.set(lang, [file])
@@ -612,7 +605,7 @@ function injectMessage(key: string): string {
 }
 
 function memberKeyFromText(text: string): { alias: string; key: string } | undefined {
-  const match = /(?:^|[^\w$])\$?(ctx|scope|hostCtx|context)\s*(?:\.|->)\s*([A-Za-z_][A-Za-z0-9_]*)/.exec(` ${text}`)
+  const match = MEMBER.exec(` ${text}`)
   if (match?.[1] === undefined || match[2] === undefined) return undefined
   return { alias: match[1], key: match[2] }
 }
@@ -641,7 +634,7 @@ function indexHits(hits: readonly SgHit[]): Map<string, SgHit[]> {
 function sgIds(
   rel: string,
   byRule: ReadonlyMap<string, readonly SgHit[]>,
-  seen: Map<string, string> = new Map(),
+  seen: Map<string, string>,
 ): Finding[] {
   const findings: Finding[] = []
   for (const hit of byRule.get('u-id') ?? []) {
@@ -794,7 +787,7 @@ function sgMembersAndToplevel(
       const bareCall = ruleId.startsWith('t-bare-') ? /^register/.exec(text.trim()) !== null : false
       // Recover receiver+method from one match (C++ `ctx->jobs.run` parses
       // with C=`ctx->jobs`; kind-only rules carry no metavariables at all).
-      const call = /(?:^|[^\w$])\$?(ctx|scope|hostCtx|context)\s*(?:\.|->)\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(` ${text}`)
+      const call = MEMBER_CALL.exec(` ${text}`)
       const bare = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(text)
       // Kind-only matches (go/rust/java/c/cpp) have no receiver info: take the
       // head member (`ctx.jobs.run()` → `ctx.jobs`) and let the depth pass below

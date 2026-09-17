@@ -10,15 +10,15 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { BUNDLED_SKILL_RANK, isSkillName } from '@deepseek-ai/dsh-skill'
-import { parseFrontmatter } from './frontmatter.ts'
 import type {
-  SkillCandidateLike,
-  SkillDefinitionLike,
-  SkillInvocationPolicyLike,
-  SkillLookupOptionsLike,
-  SkillProviderLike,
-  SkillSummaryLike,
-} from './host.ts'
+  SkillCandidate,
+  SkillDefinition,
+  SkillInvocationPolicy,
+  SkillLookupOptions,
+  SkillProvider,
+  SkillSummary,
+} from '@deepseek-ai/dsh-skill'
+import { parseFrontmatter } from './frontmatter.ts'
 
 /**
  * Rank matching a harness bundled skill, re-exported from the registry so a
@@ -36,7 +36,7 @@ const INSTRUCTION_FILE = 'SKILL.md'
 const SUMMARY_KEYS = new Set(['name', 'description', 'whenToUse', 'disable-model-invocation', 'user-invocable'])
 
 /** One parsed bundled skill. */
-export interface BundledSkill {
+interface BundledSkill {
   /** Kebab-case skill name from frontmatter, or the directory name. */
   readonly name: string
   /** Routing description from frontmatter. */
@@ -44,7 +44,7 @@ export interface BundledSkill {
   /** Extra routing hint from frontmatter, when present. */
   readonly whenToUse?: string
   /** Resolved invocation controls from the documented frontmatter keys. */
-  readonly invocation: SkillInvocationPolicyLike
+  readonly invocation: SkillInvocationPolicy
   /** Instruction body with frontmatter removed. */
   readonly content: string
   /** Remaining frontmatter keys (provider-specific only). */
@@ -56,7 +56,7 @@ export interface BundledSkill {
 }
 
 /** Options for {@link createSkillProvider}. */
-export interface SkillProviderOptions {
+interface SkillProviderOptions {
   /** Directory holding one subdirectory per skill. */
   readonly skillsDir: string
   /** Receives non-fatal discovery problems instead of throwing. */
@@ -72,7 +72,7 @@ export interface SkillProviderOptions {
  * @param signal - aborts the read for a caller that no longer wants the result.
  * @returns the parsed skill, or `undefined` with a warning when invalid.
  */
-export async function readSkillFile(
+async function readSkillFile(
   path: string,
   onWarn?: (message: string) => void,
   entryName?: string,
@@ -177,8 +177,8 @@ export async function discoverSkills(
  * @param options - skills directory and the non-fatal problem sink.
  * @returns a provider whose candidates are summaries and whose bodies come from disk.
  */
-export function createSkillProvider(options: SkillProviderOptions): SkillProviderLike {
-  const summaryOf = (skill: BundledSkill): SkillSummaryLike => ({
+export function createSkillProvider(options: SkillProviderOptions) {
+  const summaryOf = (skill: BundledSkill): SkillSummary => ({
     path: skill.path,
     name: skill.name,
     description: skill.description,
@@ -192,7 +192,7 @@ export function createSkillProvider(options: SkillProviderOptions): SkillProvide
   return {
     name: PROVIDER_NAME,
 
-    async list(lookup?: SkillLookupOptionsLike): Promise<readonly SkillCandidateLike[]> {
+    async list(lookup?: SkillLookupOptions): Promise<readonly SkillCandidate[]> {
       const skills = await discoverSkills(options.skillsDir, options.onWarn, lookup?.signal)
       return skills.map((skill) => ({
         ...summaryOf(skill),
@@ -203,9 +203,9 @@ export function createSkillProvider(options: SkillProviderOptions): SkillProvide
     },
 
     async get(
-      candidate: SkillCandidateLike,
-      lookup?: SkillLookupOptionsLike,
-    ): Promise<SkillDefinitionLike | undefined> {
+      candidate: SkillCandidate,
+      lookup?: SkillLookupOptions,
+    ): Promise<SkillDefinition | undefined> {
       if (typeof candidate.locator !== 'string') return undefined
 
       // Read the locator directly: one file instead of a full re-discovery.
@@ -216,5 +216,5 @@ export function createSkillProvider(options: SkillProviderOptions): SkillProvide
 
       return { ...summaryOf(skill), content: skill.content, metadata: skill.metadata }
     },
-  }
+  } satisfies SkillProvider
 }

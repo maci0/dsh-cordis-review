@@ -1,6 +1,6 @@
 {
   "name": "dsh-cordis-review",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "main": "lib/index.js",
@@ -14,10 +14,6 @@
     ".": {
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
-    },
-    "./check": {
-      "types": "./lib/types/check.d.ts",
-      "default": "./lib/check.js"
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"

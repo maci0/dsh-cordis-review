@@ -10,7 +10,7 @@
  * @module dsh-cordis-review/frontmatter
  */
 /** Parsed frontmatter plus the markdown body that follows it. */
-export interface Frontmatter {
+interface Frontmatter {
     /** Frontmatter mapping, values as the YAML parser produced them. */
     readonly data: Readonly<Record<string, unknown>>;
     /** Everything after the closing delimiter, or the whole source when absent. */
@@ -22,3 +22,4 @@ export interface Frontmatter {
  * @returns the parsed mapping and the remaining body.
  */
 export declare function parseFrontmatter(source: string): Frontmatter;
+export {};

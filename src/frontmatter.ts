@@ -13,7 +13,7 @@
 import { parse as parseYaml } from 'yaml'
 
 /** Parsed frontmatter plus the markdown body that follows it. */
-export interface Frontmatter {
+interface Frontmatter {
   /** Frontmatter mapping, values as the YAML parser produced them. */
   readonly data: Readonly<Record<string, unknown>>
   /** Everything after the closing delimiter, or the whole source when absent. */

@@ -1,10 +1,16 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import type { Context } from '@deepseek-ai/cordis'
+import type { SkillProvider } from '@deepseek-ai/dsh-skill'
 import { apply, name } from '../src/index.ts'
-import type { HostContext, SkillProviderLike } from '../src/host.ts'
+import type { HostContext } from '../src/host.ts'
+import type { createSkillProvider } from '../src/skills.ts'
+
+/** The provider `apply` registers, at the concrete type this package builds. */
+type Provider = ReturnType<typeof createSkillProvider>
 
 interface Captured {
-  readonly providers: SkillProviderLike[]
+  readonly providers: Provider[]
   readonly injects: string[][]
   dispose: () => void
 }
@@ -12,35 +18,35 @@ interface Captured {
 function createHost(): { ctx: HostContext; captured: Captured } {
   const captured: Captured = { providers: [], injects: [], dispose: () => {} }
 
-  const ctx: HostContext = {
-    inject: (dependencies, callback) => {
-      captured.injects.push([...dependencies])
-      const nested: Array<() => void> = []
-      const scope: HostContext = {
-        ...ctx,
-        skills: {
-          registerProvider: (create) => {
-            const provider = create()
-            captured.providers.push(provider)
-            const dispose = (): void => {
-              const index = captured.providers.indexOf(provider)
-              if (index >= 0) captured.providers.splice(index, 1)
-            }
-            nested.push(dispose)
-            return dispose
-          },
+  // The mock covers the two calls `apply` makes; the fiber the real
+  // `ctx.inject` returns is not part of the behavior under test.
+  const inject = ((dependencies: readonly string[], callback: (scope: HostContext) => void) => {
+    captured.injects.push([...dependencies])
+    const nested: Array<() => void> = []
+    const scope = {
+      inject,
+      skills: {
+        registerProvider: (create: () => SkillProvider) => {
+          const provider = create() as Provider
+          captured.providers.push(provider)
+          const dispose = (): void => {
+            const index = captured.providers.indexOf(provider)
+            if (index >= 0) captured.providers.splice(index, 1)
+          }
+          nested.push(dispose)
+          return dispose
         },
-      }
-      callback(scope)
-      const dispose = (): void => {
-        for (const inner of nested.reverse()) inner()
-      }
-      captured.dispose = dispose
-      return dispose
-    },
-  }
+      },
+    } as unknown as HostContext
+    callback(scope)
+    const dispose = (): void => {
+      for (const inner of nested.reverse()) inner()
+    }
+    captured.dispose = dispose
+    return dispose
+  }) as unknown as Context['inject']
 
-  return { ctx, captured }
+  return { ctx: { inject }, captured }
 }
 
 test('plugin name is the loader id', () => {
