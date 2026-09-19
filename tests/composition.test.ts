@@ -15,13 +15,18 @@ test('a real cordis composition mounts the bundled skill and disposes it', async
   })
 
   const summaries = await ctx.skills.list()
-  assert.deepEqual(summaries.map((summary) => summary.name), ['cordis-review'])
-  assert.match(summaries[0]?.description ?? '', /CORDIS/)
+  assert.deepEqual(summaries.map((summary) => summary.name), ['cordis-doc-review', 'cordis-review'])
+  assert.match(summaries.find((summary) => summary.name === 'cordis-review')?.description ?? '', /CORDIS/)
 
-  const loaded = await ctx.skills.get('cordis-review')
-  assert.ok(loaded)
-  assert.match(loaded.content, /## Checklist/)
-  assert.equal(loaded.provider, 'cordis-review')
+  const review = await ctx.skills.get('cordis-review')
+  assert.ok(review)
+  assert.match(review.content, /## Checklist/)
+  assert.equal(review.provider, 'cordis-review')
+
+  const docs = await ctx.skills.get('cordis-doc-review')
+  assert.ok(docs)
+  assert.match(docs.content, /## Review checklist/)
+  assert.equal(docs.provider, 'cordis-review')
 
   await fiber.dispose()
   assert.deepEqual(await ctx.skills.list(), [])

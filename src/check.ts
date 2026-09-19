@@ -2,12 +2,9 @@
  * Deterministic CORDIS tags, converged on one engine: ast-grep.
  *
  * Every tag (`mix-export`, `inject`, `toplevel`, `id`) is an ast-grep query.
- * `CheckOptions.astGrep` forces the engine on (`true`: throw when the binary
- * is missing) or off (`false`: every covered file takes the fallback path);
- * omit to auto-detect. The ast-grep binary ships no Zig grammar, so `.zig`
- * files take the fallback path unless `grammarConfig` registers one: a
- * warning on stderr plus an LLM-fallback handoff in
- * the message (the review agent reads the message and judges the file).
+ * The engine is auto-detected: when the binary is missing, every covered file
+ * warns on stderr and yields an LLM-fallback handoff in the message (the
+ * review agent reads the message and judges the file).
  *
  * @module dsh-cordis-review/check
  */
@@ -28,103 +25,19 @@ export interface Finding {
   readonly message: string
 }
 
-/** Options for {@link check}. */
-export interface CheckOptions {
-  /**
-   * Force the engine on (throw when `ast-grep` is missing) or off (every
-   * covered file takes the warning + LLM-fallback path). Omit to auto-detect.
-   */
-  readonly astGrep?: boolean
-  /**
-   * Path to an `sgconfig.yml` registering custom grammars (e.g. Zig, C3,
-   * Hare — see ast-grep-grammars). Forwarded as `ast-grep scan --config`,
-   * enabling `language:` rows the binary does not ship. `.zig` files take
-   * the LLM-fallback path unless a config providing a `zig` language is given.
-   */
-  readonly grammarConfig?: string
-}
-
 const SKIP_DIR = new Set([
-  // VCS
   '.git',
-  '.hg',
-  '.svn',
-  '.bzr',
-  // JS/TS: packages, caches, framework output
   'node_modules',
-  'bower_components',
-  '.npm',
-  '.yarn',
-  '.pnpm-store',
-  '.parcel-cache',
-  '.vite',
-  '.next',
-  '.nuxt',
-  '.astro',
-  '.svelte-kit',
-  '.turbo',
-  '.output',
-  '.vercel',
-  '.serverless',
-  '.aws-sam',
-  'out',
-  // Python: venvs, caches, test/build output
-  'venv',
-  'env',
-  '.env',
-  '.venv',
-  '__pycache__',
-  '.tox',
-  '.nox',
-  '.mypy_cache',
-  '.ruff_cache',
-  '.pytest_cache',
-  '.hypothesis',
-  '.eggs',
-  'htmlcov',
-  '.ipynb_checkpoints',
-  '.pixi',
-  // Rust / Go / Zig / C++
-  'target',
-  'vendor',
-  'zig-out',
-  'zig-pkg',
-  '.zig-cache',
-  // .NET / JVM / Apple
-  'bin',
-  'obj',
-  'TestResults',
-  'packages',
-  '.gradle',
-  '.m2',
-  'DerivedData',
-  'Pods',
-  'Carthage',
-  // Dart / Elixir / Haskell
-  '.dart_tool',
-  '_build',
-  'deps',
-  '.elixir_ls',
-  '.stack-work',
-  'dist-newstyle',
-  // Ruby
-  '.bundle',
-  // Terraform
-  '.terraform',
-  '.terragrunt-cache',
-  // IDE / generic generated
-  '.idea',
-  '.vscode',
-  '.vs',
-  '.cache',
   'dist',
   'build',
+  'venv',
+  '__pycache__',
+  'target',
+  '.venv',
   'coverage',
-  'logs',
-  'tmp',
-  '.tmp',
-  '.dsh-module-fallback',
-  'outputs',
+  '.next',
+  'vendor',
+  'out',
 ])
 
 /** Generated dirs with a variable prefix/suffix the exact set cannot name. */
@@ -137,10 +50,7 @@ function isSkippedDir(part: string): boolean {
 /**
  * ast-grep language per file extension. One map serves both jobs: it is the
  * coverage set (`check` reads a file only when its extension appears here) and
- * the grouping that routes each file to the id / script / polyglot pass.
- * `.zig` is the one special case: it appears here for the grammar-config path,
- * but the coverage loop handles it explicitly because the shipped binary has
- * no Zig grammar.
+ * the grouping that routes each file to the id / script / python pass.
  */
 const LANGUAGE: Record<string, string> = {
   '.ts': 'typescript',
@@ -155,28 +65,6 @@ const LANGUAGE: Record<string, string> = {
   '.yaml': 'yaml',
   '.py': 'python',
   '.pyi': 'python',
-  '.go': 'go',
-  '.c': 'c',
-  '.h': 'c',
-  '.cc': 'cpp',
-  '.cpp': 'cpp',
-  '.cxx': 'cpp',
-  '.hpp': 'cpp',
-  '.hh': 'cpp',
-  '.java': 'java',
-  '.rs': 'rust',
-  '.lua': 'lua',
-  '.swift': 'swift',
-  '.scala': 'scala',
-  '.dart': 'dart',
-  '.kt': 'kotlin',
-  '.kts': 'kotlin',
-  '.rb': 'ruby',
-  '.php': 'php',
-  '.cs': 'csharp',
-  '.ex': 'elixir',
-  '.exs': 'elixir',
-  '.zig': 'zig',
 }
 
 /** Languages whose files carry the JS/TS tags (mix-export plus member passes). */
@@ -217,13 +105,18 @@ const CTX_ALIAS = new RegExp(`^${CTX_ALT}$`)
 const TOPLEVEL_VERB = /^(effect|on|set|plugin|register)/
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/
 /**
- * Service-key shape, enforced only for non-TS languages (the `nonTs` flag).
- * Snake_case or `_`-leading members (`_undos`, `do_thing`) are locals in
- * every grammar the checker covers: service keys carry no underscores.
- * TS/JS keep the old behavior (Cordis TS keys are host-defined; narrowing
- * there would trade false negatives for fewer false positives).
+ * Service-key shape, enforced only for Python (the `nonTs` flag).
+ * Snake_case or `_`-leading members (`_undos`, `do_thing`) are locals in the
+ * Python grammar: service keys carry no underscores. TS/JS keep the old
+ * behavior (Cordis TS keys are host-defined; narrowing there would trade
+ * false negatives for fewer false positives).
  */
 const NONTS_KEY = /^[A-Za-z][A-Za-z0-9]*$/
+
+/** `alias.member` / `alias->member` anywhere in a text; alias and member are groups 1-2. */
+const MEMBER = new RegExp(`(?:^|[^\\w$])\\$?${CTX_ALT}\\s*(?:\\.|->)\\s*([A-Za-z_][A-Za-z0-9_]*)`)
+/** {@link MEMBER} restricted to a call: `alias.member(`. */
+const MEMBER_CALL = new RegExp(`${MEMBER.source}\\s*\\(`)
 
 /**
  * True when `line` continues `alias.KEY` with another `.` / `->`
@@ -241,162 +134,307 @@ function continuedAccess(line: string, alias: string, key: string): boolean {
   return false
 }
 
-/** One ast-grep `scan` rule: one engine spawn covers every file of these languages. */
-interface SgRule {
-  readonly id: string
-  readonly language: string
-  readonly pattern?: string
-  readonly kind?: string
-  /** Extra `regex` constraint ANDed onto the rule (matches receiver-headed text). */
-  readonly regex?: string
-  /** Matches whose text starts with this (with `kind`): bare calls like `register(`. */
-  readonly textPrefix?: string
-  readonly notInside?: readonly string[]
-}
-
-/** `alias.member` / `alias->member` anywhere in a text; alias and member are groups 1-2. */
-const MEMBER = new RegExp(`(?:^|[^\\w$])\\$?${CTX_ALT}\\s*(?:\\.|->)\\s*([A-Za-z_][A-Za-z0-9_]*)`)
-/** {@link MEMBER} restricted to a call: `alias.member(`. */
-const MEMBER_CALL = new RegExp(`${MEMBER.source}\\s*\\(`)
-
-/** Prune non-`ctx` matches inside the engine: member/call/get/inject texts start at the receiver. */
-const CTX_HEAD = `^\\$?${CTX_ALT}\\b`
-
 /**
- * Single multi-language rule document. Rule order is load-bearing only for
- * readability — matches carry ruleId, so evaluation order never changes output.
- * Keep the member/call/toplevel triple together per family when adding rules.
+ * One static multi-rule document per language, fed to `ast-grep scan
+ * --inline-rules`. One engine spawn covers every file of the language.
+ * Rule order is load-bearing only for readability — matches carry ruleId, so
+ * evaluation order never changes output. Keep the member/call/toplevel triple
+ * together per language when adding rules.
  */
-/** Rule doc for one language only; undefined when no rule serves it. */
-function sgRulesDocFor(withZig: boolean, lang: string): string | undefined {
-  const rules = sgRules(withZig, lang)
-  if (rules.length === 0) return undefined
-  return rules.map((rule) => sgRuleYaml(rule)).join('---\n')
-}
-
-function sgRules(withZig: boolean, lang?: string): SgRule[] {
-  const all: SgRule[] = [
-    // yaml ids
-    { id: 'u-id', language: 'yaml', pattern: 'id: $ID' },
-    // JS/TS mix-export
-    { id: 'u-def', language: 'typescript', pattern: 'export default $X' },
-    { id: 'u-fn', language: 'typescript', pattern: 'export function $N($$$ARGS) { $$$BODY }' },
-    { id: 'u-const', language: 'typescript', pattern: 'export const $N = $V' },
-    { id: 'u-const-typed', language: 'typescript', pattern: 'export const $N: $T = $V' },
-    { id: 'u-named', language: 'typescript', pattern: 'export { $X }' },
-    { id: 'u-def-js', language: 'javascript', pattern: 'export default $X' },
-    { id: 'u-fn-js', language: 'javascript', pattern: 'export function $N($$$ARGS) { $$$BODY }' },
-    { id: 'u-const-js', language: 'javascript', pattern: 'export const $N = $V' },
-    { id: 'u-named-js', language: 'javascript', pattern: 'export { $X }' },
-    { id: 'u-def-tsx', language: 'tsx', pattern: 'export default $X' },
-    { id: 'u-fn-tsx', language: 'tsx', pattern: 'export function $N($$$ARGS) { $$$BODY }' },
-    { id: 'u-const-tsx', language: 'tsx', pattern: 'export const $N = $V' },
-    { id: 'u-named-tsx', language: 'tsx', pattern: 'export { $X }' },
-    // inject declarations
-    { id: 'u-decl', language: 'typescript', pattern: 'export const inject = $V' },
-    { id: 'u-decl-bare', language: 'typescript', pattern: 'inject = $V' },
-    { id: 'u-decl-js', language: 'javascript', pattern: 'export const inject = $V' },
-    { id: 'u-decl-bare-js', language: 'javascript', pattern: 'inject = $V' },
-    { id: 'u-decl-tsx', language: 'tsx', pattern: 'export const inject = $V' },
-    { id: 'u-decl-bare-tsx', language: 'tsx', pattern: 'inject = $V' },
-    { id: 'u-decl-py', language: 'python', pattern: 'inject = $V' },
-    // member reads ($C.$K)
-    { id: 'm-ts', language: 'typescript', pattern: '$C.$K', regex: CTX_HEAD },
-    { id: 'm-js', language: 'javascript', pattern: '$C.$K', regex: CTX_HEAD },
-    { id: 'm-tsx', language: 'tsx', pattern: '$C.$K', regex: CTX_HEAD },
-    { id: 'm-py', language: 'python', pattern: '$C.$K', regex: CTX_HEAD },
-    { id: 'm-go', language: 'go', kind: 'selector_expression', regex: CTX_HEAD },
-    { id: 'm-c', language: 'c', pattern: '$C.$K', regex: CTX_HEAD },
-    { id: 'm-cpp', language: 'cpp', kind: 'field_expression', regex: CTX_HEAD },
-    { id: 'm-java', language: 'java', kind: 'field_access', regex: CTX_HEAD },
-    { id: 'm-rust', language: 'rust', pattern: '$C.$K', regex: CTX_HEAD },
-    { id: 'm-lua', language: 'lua', pattern: '$C.$K', regex: CTX_HEAD },
-    { id: 'm-swift', language: 'swift', pattern: '$C.$K', regex: CTX_HEAD },
-    { id: 'm-scala', language: 'scala', pattern: '$C.$K', regex: CTX_HEAD },
-    { id: 'm-dart', language: 'dart', kind: 'member_expression', regex: CTX_HEAD },
-    { id: 'm-kotlin', language: 'kotlin', kind: 'navigation_expression', regex: CTX_HEAD },
-    { id: 'm-ruby', language: 'ruby', kind: 'call', regex: CTX_HEAD },
-    { id: 'm-php', language: 'php', pattern: '$C->$K', regex: CTX_HEAD },
-    { id: 'm-csharp', language: 'csharp', kind: 'member_access_expression', regex: CTX_HEAD },
-    { id: 'm-elixir', language: 'elixir', pattern: '$C.$K', regex: CTX_HEAD },
-    // toplevel-shaped calls at depth 0 via inside-negation.
-    // ast-grep `inside` does not see through fn bodies in some grammars
-    // (rust `function_item`, go closures), so toplevel also keeps the old
-    // brace-depth line pass over these matches — the match set is ast-grep's.
-    { id: 't-ts', language: 'typescript', pattern: '$C.$M($$$ARGS)', regex: CTX_HEAD, notInside: ['function_declaration', 'arrow_function', 'function_expression', 'method_definition'] },
-    { id: 't-js', language: 'javascript', pattern: '$C.$M($$$ARGS)', regex: CTX_HEAD, notInside: ['function_declaration', 'arrow_function', 'function_expression', 'method_definition'] },
-    { id: 't-tsx', language: 'tsx', pattern: '$C.$M($$$ARGS)', regex: CTX_HEAD, notInside: ['function_declaration', 'arrow_function', 'function_expression', 'method_definition'] },
-    { id: 't-py', language: 'python', pattern: '$C.$M($$$ARGS)', regex: CTX_HEAD, notInside: ['function_definition', 'lambda'] },
-    { id: 't-go', language: 'go', kind: 'call_expression', regex: CTX_HEAD, notInside: ['function_declaration', 'func_literal'] },
-    { id: 't-rs', language: 'rust', kind: 'call_expression', regex: CTX_HEAD, notInside: ['function_item'] },
-    { id: 't-java', language: 'java', kind: 'method_invocation', regex: CTX_HEAD, notInside: ['method_declaration'] },
-    { id: 't-c', language: 'c', kind: 'call_expression', regex: CTX_HEAD, notInside: ['function_definition'] },
-    { id: 't-cpp', language: 'cpp', kind: 'call_expression', regex: CTX_HEAD, notInside: ['function_definition'] },
-    { id: 't-lua', language: 'lua', kind: 'function_call', regex: CTX_HEAD, notInside: ['function_declaration'] },
-    { id: 't-swift', language: 'swift', kind: 'call_expression', regex: CTX_HEAD, notInside: ['function_declaration'] },
-    { id: 't-scala', language: 'scala', kind: 'call_expression', regex: CTX_HEAD, notInside: ['function_definition'] },
-    { id: 't-dart', language: 'dart', kind: 'call_expression', regex: CTX_HEAD, notInside: ['function_declaration'] },
-    { id: 't-kotlin', language: 'kotlin', kind: 'call_expression', regex: CTX_HEAD, notInside: ['function_declaration'] },
-    { id: 't-ruby', language: 'ruby', kind: 'call', regex: CTX_HEAD, notInside: ['method'] },
-    { id: 't-php', language: 'php', pattern: '$C->$M($$$ARGS)', regex: CTX_HEAD, notInside: ['function_definition'] },
-    { id: 't-csharp', language: 'csharp', kind: 'invocation_expression', regex: CTX_HEAD, notInside: ['method_declaration', 'local_function_statement'] },
-    // No t-elixir: every elixir node is a `call`, so `inside` negation cannot
-    // separate def bodies from module top level (verified empirically); the
-    // brace-depth backstop cannot see `do/end` either. Inject precision only.
-    // bare `register(` — kept parallel to the old per-file query; C/C++ use
-    // kind+regex because `register($$$ARGS)` does not parse there
-    { id: 't-bare-py', language: 'python', pattern: 'register($$$ARGS)', notInside: ['function_definition', 'lambda'] },
-    { id: 't-bare-go', language: 'go', pattern: 'register($$$ARGS)', notInside: ['function_declaration'] },
-    { id: 't-bare-rs', language: 'rust', pattern: 'register($$$ARGS)', notInside: ['function_item', 'closure_expression'] },
-    { id: 't-bare-java', language: 'java', pattern: 'register($$$ARGS)', notInside: ['method_declaration', 'lambda_expression'] },
-    { id: 't-bare-ts', language: 'typescript', pattern: 'register($$$ARGS)', notInside: ['function_declaration', 'arrow_function', 'function_expression', 'method_definition'] },
-    { id: 't-bare-js', language: 'javascript', pattern: 'register($$$ARGS)', notInside: ['function_declaration', 'arrow_function', 'function_expression', 'method_definition'] },
-    { id: 't-bare-tsx', language: 'tsx', pattern: 'register($$$ARGS)', notInside: ['function_declaration', 'arrow_function', 'function_expression', 'method_definition'] },
-    { id: 't-bare-c', language: 'c', kind: 'call_expression', textPrefix: 'register', notInside: ['function_definition'] },
-    { id: 't-bare-cpp', language: 'cpp', kind: 'call_expression', textPrefix: 'register', notInside: ['function_definition'] },
-    { id: 't-bare-lua', language: 'lua', pattern: 'register($$$ARGS)', notInside: ['function_declaration'] },
-    { id: 't-bare-swift', language: 'swift', pattern: 'register($$$ARGS)', notInside: ['function_declaration'] },
-    { id: 't-bare-scala', language: 'scala', pattern: 'register($$$ARGS)', notInside: ['function_definition'] },
-    { id: 't-bare-dart', language: 'dart', kind: 'call_expression', textPrefix: 'register', notInside: ['function_declaration'] },
-    { id: 't-bare-kotlin', language: 'kotlin', pattern: 'register($$$ARGS)', notInside: ['function_declaration'] },
-    { id: 't-bare-ruby', language: 'ruby', pattern: 'register($$$ARGS)', notInside: ['method'] },
-    { id: 't-bare-php', language: 'php', pattern: 'register($$$ARGS)', notInside: ['function_definition'] },
-    { id: 't-bare-csharp', language: 'csharp', pattern: 'register($$$ARGS)', notInside: ['method_declaration', 'local_function_statement'] },
-    // No t-bare-elixir: same `call`-shaped AST reason as t-elixir above.
-    // Zig rows need a custom grammar: only emitted when `grammarConfig`
-    // registers one — an unknown `language:` poisons the whole inline doc.
-    ...(withZig
-      ? [
-          { id: 'm-zig', language: 'zig', pattern: '$C.$K', regex: CTX_HEAD },
-          { id: 't-zig', language: 'zig', kind: 'call_expression', regex: CTX_HEAD, notInside: ['function_declaration'] },
-          { id: 't-bare-zig', language: 'zig', pattern: 'register($$$ARGS)', notInside: ['function_declaration'] },
-        ] as SgRule[]
-      : []),
-    // ctx.get / ctx.inject widening (data for the inject pass)
-    { id: 'u-get-ts', language: 'typescript', pattern: '$C.get($$$ARGS)', regex: CTX_HEAD },
-    { id: 'u-get-js', language: 'javascript', pattern: '$C.get($$$ARGS)', regex: CTX_HEAD },
-    { id: 'u-get-tsx', language: 'tsx', pattern: '$C.get($$$ARGS)', regex: CTX_HEAD },
-    { id: 'u-get-py', language: 'python', pattern: '$C.get($$$ARGS)', regex: CTX_HEAD },
-    { id: 'u-inject-ts', language: 'typescript', pattern: '$C.inject($$$ARGS)', regex: CTX_HEAD },
-    { id: 'u-inject-js', language: 'javascript', pattern: '$C.inject($$$ARGS)', regex: CTX_HEAD },
-    { id: 'u-inject-tsx', language: 'tsx', pattern: '$C.inject($$$ARGS)', regex: CTX_HEAD },
-    { id: 'u-inject-py', language: 'python', pattern: '$C.inject($$$ARGS)', regex: CTX_HEAD },
-  ]
-  return lang === undefined ? all : all.filter((rule) => rule.language === lang)
-}
-
-function sgRuleYaml(rule: SgRule): string {
-  const header = `id: ${rule.id}\nlanguage: ${rule.language}\nrule:\n`
-  const base = rule.kind !== undefined ? `kind: ${rule.kind}` : `pattern: ${JSON.stringify(rule.pattern ?? '')}`
-  const regexes = [
-    ...(rule.textPrefix !== undefined ? [JSON.stringify(`^${rule.textPrefix}`)] : []),
-    ...(rule.regex !== undefined ? [JSON.stringify(rule.regex)] : []),
-  ].map((regex) => `\n    - regex: ${regex}`).join('')
-  const withText = `${base}${regexes}`
-  if (rule.notInside === undefined && regexes === '') return `${header}  ${withText}\n`
-  const kinds = (rule.notInside ?? []).map((kind) => `            - kind: ${kind}`).join('\n')
-  const negate = rule.notInside !== undefined ? `\n    - not:\n        inside:\n          any:\n${kinds}` : ''
-  return `${header}  all:\n    - ${withText}${negate}\n`
+const SG_DOC: Record<string, string> = {
+  yaml: String.raw`id: u-id
+language: yaml
+rule:
+  pattern: "id: $ID"
+`,
+  typescript: String.raw`id: u-def
+language: typescript
+rule:
+  pattern: "export default $X"
+---
+id: u-fn
+language: typescript
+rule:
+  pattern: "export function $N($$$ARGS) { $$$BODY }"
+---
+id: u-const
+language: typescript
+rule:
+  pattern: "export const $N = $V"
+---
+id: u-const-typed
+language: typescript
+rule:
+  pattern: "export const $N: $T = $V"
+---
+id: u-named
+language: typescript
+rule:
+  pattern: "export { $X }"
+---
+id: u-decl
+language: typescript
+rule:
+  pattern: "export const inject = $V"
+---
+id: u-decl-bare
+language: typescript
+rule:
+  pattern: "inject = $V"
+---
+id: m-ts
+language: typescript
+rule:
+  all:
+    - pattern: "$C.$K"
+    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
+---
+id: t-ts
+language: typescript
+rule:
+  all:
+    - pattern: "$C.$M($$$ARGS)"
+    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
+    - not:
+        inside:
+          any:
+            - kind: function_declaration
+            - kind: arrow_function
+            - kind: function_expression
+            - kind: method_definition
+---
+id: t-bare-ts
+language: typescript
+rule:
+  all:
+    - pattern: "register($$$ARGS)"
+    - not:
+        inside:
+          any:
+            - kind: function_declaration
+            - kind: arrow_function
+            - kind: function_expression
+            - kind: method_definition
+---
+id: u-get-ts
+language: typescript
+rule:
+  all:
+    - pattern: "$C.get($$$ARGS)"
+    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
+---
+id: u-inject-ts
+language: typescript
+rule:
+  all:
+    - pattern: "$C.inject($$$ARGS)"
+    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
+`,
+  javascript: String.raw`id: u-def-js
+language: javascript
+rule:
+  pattern: "export default $X"
+---
+id: u-fn-js
+language: javascript
+rule:
+  pattern: "export function $N($$$ARGS) { $$$BODY }"
+---
+id: u-const-js
+language: javascript
+rule:
+  pattern: "export const $N = $V"
+---
+id: u-named-js
+language: javascript
+rule:
+  pattern: "export { $X }"
+---
+id: u-decl-js
+language: javascript
+rule:
+  pattern: "export const inject = $V"
+---
+id: u-decl-bare-js
+language: javascript
+rule:
+  pattern: "inject = $V"
+---
+id: m-js
+language: javascript
+rule:
+  all:
+    - pattern: "$C.$K"
+    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
+---
+id: t-js
+language: javascript
+rule:
+  all:
+    - pattern: "$C.$M($$$ARGS)"
+    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
+    - not:
+        inside:
+          any:
+            - kind: function_declaration
+            - kind: arrow_function
+            - kind: function_expression
+            - kind: method_definition
+---
+id: t-bare-js
+language: javascript
+rule:
+  all:
+    - pattern: "register($$$ARGS)"
+    - not:
+        inside:
+          any:
+            - kind: function_declaration
+            - kind: arrow_function
+            - kind: function_expression
+            - kind: method_definition
+---
+id: u-get-js
+language: javascript
+rule:
+  all:
+    - pattern: "$C.get($$$ARGS)"
+    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
+---
+id: u-inject-js
+language: javascript
+rule:
+  all:
+    - pattern: "$C.inject($$$ARGS)"
+    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
+`,
+  tsx: String.raw`id: u-def-tsx
+language: tsx
+rule:
+  pattern: "export default $X"
+---
+id: u-fn-tsx
+language: tsx
+rule:
+  pattern: "export function $N($$$ARGS) { $$$BODY }"
+---
+id: u-const-tsx
+language: tsx
+rule:
+  pattern: "export const $N = $V"
+---
+id: u-named-tsx
+language: tsx
+rule:
+  pattern: "export { $X }"
+---
+id: u-decl-tsx
+language: tsx
+rule:
+  pattern: "export const inject = $V"
+---
+id: u-decl-bare-tsx
+language: tsx
+rule:
+  pattern: "inject = $V"
+---
+id: m-tsx
+language: tsx
+rule:
+  all:
+    - pattern: "$C.$K"
+    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
+---
+id: t-tsx
+language: tsx
+rule:
+  all:
+    - pattern: "$C.$M($$$ARGS)"
+    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
+    - not:
+        inside:
+          any:
+            - kind: function_declaration
+            - kind: arrow_function
+            - kind: function_expression
+            - kind: method_definition
+---
+id: t-bare-tsx
+language: tsx
+rule:
+  all:
+    - pattern: "register($$$ARGS)"
+    - not:
+        inside:
+          any:
+            - kind: function_declaration
+            - kind: arrow_function
+            - kind: function_expression
+            - kind: method_definition
+---
+id: u-get-tsx
+language: tsx
+rule:
+  all:
+    - pattern: "$C.get($$$ARGS)"
+    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
+---
+id: u-inject-tsx
+language: tsx
+rule:
+  all:
+    - pattern: "$C.inject($$$ARGS)"
+    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
+`,
+  python: String.raw`id: u-decl-py
+language: python
+rule:
+  pattern: "inject = $V"
+---
+id: m-py
+language: python
+rule:
+  all:
+    - pattern: "$C.$K"
+    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
+---
+id: t-py
+language: python
+rule:
+  all:
+    - pattern: "$C.$M($$$ARGS)"
+    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
+    - not:
+        inside:
+          any:
+            - kind: function_definition
+            - kind: lambda
+---
+id: t-bare-py
+language: python
+rule:
+  all:
+    - pattern: "register($$$ARGS)"
+    - not:
+        inside:
+          any:
+            - kind: function_definition
+            - kind: lambda
+---
+id: u-get-py
+language: python
+rule:
+  all:
+    - pattern: "$C.get($$$ARGS)"
+    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
+---
+id: u-inject-py
+language: python
+rule:
+  all:
+    - pattern: "$C.inject($$$ARGS)"
+    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
+`,
 }
 
 function warn(message: string): void {
@@ -423,33 +461,19 @@ function fallback(rel: string, ext: string): Finding {
 /**
  * Scan `root` for the closed-form tags.
  * @param root - workspace (or subdirectory) to walk.
- * @param options - ast-grep on/off/detect.
  */
-export async function check(root: string, options: CheckOptions = {}): Promise<readonly Finding[]> {
+export async function check(root: string): Promise<readonly Finding[]> {
   const files = await listFiles(root)
   const detected = astGrepOnPath()
-  const wantSg = options.astGrep ?? detected
-  if (!detected && options.astGrep !== false) {
+  if (!detected) {
     warn('ast-grep not on PATH: every covered file takes the warning + LLM-fallback path. Install ast-grep for deterministic results.')
-  }
-  if (options.astGrep === true && !detected) {
-    throw new Error('ast-grep forced on but not on PATH: install ast-grep or rerun without { astGrep: true }.')
   }
 
   const covered: string[] = []
-  const zig: string[] = []
   for (const abs of files) {
-    const rel = relative(root, abs).split('\\').join('/')
     const ext = extname(abs).toLowerCase()
-    if (isTestPath(rel)) continue
+    if (isTestPath(relative(root, abs).split('\\').join('/'))) continue
     if (abs.endsWith('.d.ts')) continue
-    if (ext === '.zig') {
-      // Custom grammars (via `grammarConfig`) make zig scannable; without
-      // one there is no grammar, so keep the LLM-fallback path.
-      if (options.grammarConfig !== undefined) covered.push(abs)
-      else zig.push(abs)
-      continue
-    }
     if (LANGUAGE[ext] === undefined) continue
     const text = SKIPPABLE.has(ext) ? await readFile(abs, 'utf8') : undefined
     if (text !== undefined && text.includes('__ModuleLoader__')) continue
@@ -458,8 +482,8 @@ export async function check(root: string, options: CheckOptions = {}): Promise<r
 
   // Single scan spawn for the whole tree; per-file grouping below is just
   // bucketing matches by their `file` field, not more engine calls.
-  const raw = wantSg ? sgScanAll(covered, options.grammarConfig) : undefined
-  if (raw === undefined && wantSg) {
+  const raw = detected ? sgScanAll(covered) : undefined
+  if (raw === undefined && detected) {
     const first = covered.length > 0 ? relative(root, covered[0] ?? '').split('\\').join('/') : root
     sgOrThrow(first)
   }
@@ -476,12 +500,12 @@ export async function check(root: string, options: CheckOptions = {}): Promise<r
   for (const abs of covered) {
     const rel = relative(root, abs).split('\\').join('/')
     const ext = extname(abs).toLowerCase()
-    const byRule = indexHits(byFile.get(abs) ?? [])
-    const language = LANGUAGE[ext]
-    if (!wantSg) {
+    if (raw === undefined) {
       findings.push(fallback(rel, ext))
       continue
     }
+    const byRule = indexHits(byFile.get(abs) ?? [])
+    const language = LANGUAGE[ext]
     if (language === 'yaml') {
       findings.push(...sgIds(rel, byRule, seenIds))
       continue
@@ -491,11 +515,8 @@ export async function check(root: string, options: CheckOptions = {}): Promise<r
       findings.push(...sgScript(rel, byRule, text))
       continue
     }
-    findings.push(...(await sgPolyglot(rel, byRule, abs)))
-  }
-  for (const abs of zig) {
-    const rel = relative(root, abs).split('\\').join('/')
-    findings.push(fallback(rel, extname(abs).toLowerCase()))
+    const text = await readFile(abs, 'utf8')
+    findings.push(...sgMembersAndToplevel(rel, byRule, text, true, 'm-py', 't-py'))
   }
 
   return findings.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.tag.localeCompare(b.tag))
@@ -503,14 +524,27 @@ export async function check(root: string, options: CheckOptions = {}): Promise<r
 
 async function listFiles(root: string): Promise<string[]> {
   const out: string[] = []
-  const entries = await readdir(root, { withFileTypes: true, recursive: true })
-  for (const entry of entries) {
-    if (!entry.isFile()) continue
-    const abs = join(entry.parentPath, entry.name)
-    const rel = relative(root, abs).split('\\').join('/')
-    if (rel.split('/').some(isSkippedDir)) continue
-    out.push(abs)
+  // Walk by hand instead of `readdir({ recursive: true })`: pruning skipped
+  // dirs during descent keeps node_modules unvisited, and skipping entries
+  // that are neither plain files nor plain dirs means a symlinked dir (pnpm's
+  // store layout) is never followed, so no ELOOP and no double-reported files.
+  const walk = async (dir: string): Promise<void> => {
+    let entries
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      const abs = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        if (!isSkippedDir(entry.name)) await walk(abs)
+      } else if (entry.isFile()) {
+        out.push(abs)
+      }
+    }
   }
+  await walk(root)
   return out
 }
 
@@ -539,7 +573,7 @@ interface SgHit {
 }
 
 /** `ast-grep scan` spawns over every covered file: hits, [] on no match, undefined on engine failure. */
-function sgScanAll(files: readonly string[], grammarConfig?: string): SgHit[] | undefined {
+function sgScanAll(files: readonly string[]): SgHit[] | undefined {
   if (files.length === 0) return []
   // One spawn per 50 files: bounds argv size and keeps each batch's JSON
   // stdout inside maxBuffer (dense trees emit ~0.5MB/file). A single file
@@ -548,7 +582,7 @@ function sgScanAll(files: readonly string[], grammarConfig?: string): SgHit[] | 
   // ponytail: fixed chunks; stream stdout to disk if a real tree ever hits the ceiling.
   const out: SgHit[] = []
   for (let index = 0; index < files.length; index += 50) {
-    const batch = sgScanBatch(files.slice(index, index + 50), grammarConfig)
+    const batch = sgScanBatch(files.slice(index, index + 50))
     if (batch === undefined) return undefined
     out.push(...batch)
   }
@@ -556,10 +590,11 @@ function sgScanAll(files: readonly string[], grammarConfig?: string): SgHit[] | 
 }
 
 /** One bounded `ast-grep scan` spawn. */
-function sgScanBatch(files: readonly string[], grammarConfig?: string): SgHit[] | undefined {
+function sgScanBatch(files: readonly string[]): SgHit[] | undefined {
   // One spawn per language present: the engine evaluates every rule in the
-  // doc against every file, so a single 86-rule doc costs per-file eval time
-  // linear in rule count. Per-language docs keep each spawn's rule set small.
+  // doc against every file, so a single multi-language doc costs per-file
+  // eval time linear in rule count. Per-language docs keep each spawn's rule
+  // set small.
   const byLang = new Map<string, string[]>()
   for (const file of files) {
     const lang = LANGUAGE[extname(file).toLowerCase()]
@@ -568,13 +603,11 @@ function sgScanBatch(files: readonly string[], grammarConfig?: string): SgHit[] 
     if (list === undefined) byLang.set(lang, [file])
     else list.push(file)
   }
-  const config = grammarConfig !== undefined ? ['--config', grammarConfig] : []
-  const withZig = grammarConfig !== undefined
   const out: SgHit[] = []
   for (const [lang, langFiles] of byLang) {
-    const doc = sgRulesDocFor(withZig, lang)
+    const doc = SG_DOC[lang]
     if (doc === undefined) continue
-    const result = spawnSync('ast-grep', ['scan', ...config, '--inline-rules', doc, '--json=compact', ...langFiles], {
+    const result = spawnSync('ast-grep', ['scan', '--inline-rules', doc, '--json=compact', ...langFiles], {
       encoding: 'utf8',
       maxBuffer: 32 * 1024 * 1024,
     })
@@ -731,11 +764,6 @@ function sgScript(rel: string, byRule: ReadonlyMap<string, readonly SgHit[]>, te
   return findings.concat(sgMembersAndToplevel(rel, byRule, text, false, 'm-ts', 'm-js', 'm-tsx', 't-ts', 't-js', 't-tsx'))
 }
 
-async function sgPolyglot(rel: string, byRule: ReadonlyMap<string, readonly SgHit[]>, abs: string): Promise<Finding[]> {
-  const text = await readFile(abs, 'utf8')
-  return sgMembersAndToplevel(rel, byRule, text, true, 'm-py', 'm-go', 'm-c', 'm-cpp', 'm-java', 'm-rust', 'm-lua', 'm-swift', 'm-scala', 'm-dart', 'm-kotlin', 'm-ruby', 'm-php', 'm-csharp', 'm-elixir', 'm-zig', 't-py', 't-go', 't-rs', 't-java', 't-c', 't-cpp', 't-lua', 't-swift', 't-scala', 't-dart', 't-kotlin', 't-ruby', 't-php', 't-csharp', 't-zig')
-}
-
 /** Shared inject + toplevel pass over one scan's member/call matches. */
 function sgMembersAndToplevel(
   rel: string,
@@ -760,11 +788,8 @@ function sgMembersAndToplevel(
       if (!IDENT.test(parsed.key) || CTX_INTRINSICS.has(parsed.key) || declared.has(parsed.key)) continue
       if (nonTs && !NONTS_KEY.test(parsed.key)) continue
       // A bare call is a host method, not a coeffect: only `ctx.KEY.…`
-      // survived (covers `ctx.jobs.run()`, Go `ctx.Tools.Register()`), and
-      // the call itself never reads (`ctx.tools.register()` is the service
-      // `tools` providing `register`, already caught at its member). Kind-only
-      // matches (java `field_access`) carry no trailing text, so fall back to
-      // the source line for the continuation check.
+      // survived. The call itself never reads (`ctx.tools.register()` is the
+      // service `tools` providing `register`, already caught at its member).
       const contText = continuedAccess(hit.text ?? '', parsed.alias, parsed.key)
         ? hit.text ?? ''
         : (srcLines[lineOf(hit) - 1] ?? '')
@@ -785,18 +810,13 @@ function sgMembersAndToplevel(
       const ruleId = hit.ruleId ?? ''
       // t-bare-*: the whole match is the call; method is its callee name.
       const bareCall = ruleId.startsWith('t-bare-') ? /^register/.exec(text.trim()) !== null : false
-      // Recover receiver+method from one match (C++ `ctx->jobs.run` parses
-      // with C=`ctx->jobs`; kind-only rules carry no metavariables at all).
+      // Recover receiver+method from one match.
       const call = MEMBER_CALL.exec(` ${text}`)
       const bare = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(text)
-      // Kind-only matches (go/rust/java/c/cpp) have no receiver info: take the
-      // head member (`ctx.jobs.run()` → `ctx.jobs`) and let the depth pass below
-      // decide toplevel-ness; the inject pass already judged the key.
-      const dotted = /^\$?([A-Za-z_][A-Za-z0-9_]*)\s*(?:\.|->)\s*([A-Za-z_][A-Za-z0-9_]*)/.exec(text.trim())
       const recv = call?.[1] ?? ''
-      const method = call?.[2] ?? (bareCall ? 'register' : (bare?.[1] ?? dotted?.[2] ?? ''))
+      const method = call?.[2] ?? (bareCall ? 'register' : (bare?.[1] ?? ''))
       if (!IDENT.test(method)) continue
-      if (recv === '' && !bareCall && dotted === null) continue
+      if (recv === '' && !bareCall) continue
       callLines.set(lineOf(hit), { recv, method })
     }
   }

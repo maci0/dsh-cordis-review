@@ -65,29 +65,41 @@ test('parseFrontmatter reads a chomped folded scalar', () => {
   assert.equal(parsed.data['description'], 'one two')
 })
 
-test('bundled skill is discoverable and user-invocable', async () => {
+test('bundled skills are discoverable and user-invocable', async () => {
   const skills = await discoverSkills(skillsDir)
-  assert.equal(skills.length, 1)
-  const skill = skills[0]
-  assert.ok(skill)
-  assert.equal(skill.name, 'cordis-review')
-  assert.match(skill.description, /CORDIS/)
-  assert.match(skill.content, /arXiv:2608\.25512/)
-  // Only the documented DSH keys live in the frontmatter, so nothing is left
-  // over as provider-specific metadata.
-  assert.deepEqual(skill.metadata, {})
-  assert.deepEqual(skill.invocation, { modelInvocable: true, userInvocable: true })
+  assert.deepEqual(
+    skills.map((skill) => skill.name),
+    ['cordis-doc-review', 'cordis-review'],
+  )
+
+  const review = skills.find((skill) => skill.name === 'cordis-review')
+  assert.ok(review)
+  assert.match(review.description, /CORDIS/)
+  assert.match(review.content, /arXiv:2608\.25512/)
+  assert.deepEqual(review.metadata, {})
+  assert.deepEqual(review.invocation, { modelInvocable: true, userInvocable: true })
+
+  const docs = skills.find((skill) => skill.name === 'cordis-doc-review')
+  assert.ok(docs)
+  assert.match(docs.description, /documentation/i)
+  assert.match(docs.content, /## Review checklist/)
+  assert.deepEqual(docs.metadata, {})
+  assert.deepEqual(docs.invocation, { modelInvocable: true, userInvocable: true })
 
   const provider = createSkillProvider({ skillsDir })
   assert.equal(provider.name, 'cordis-review')
   const listed = await provider.list()
-  assert.equal(listed[0]?.rank, BUNDLED_SKILL_RANK)
-  assert.deepEqual(listed[0]?.invocation, { modelInvocable: true, userInvocable: true })
+  assert.deepEqual(
+    listed.map((skill) => skill.name),
+    ['cordis-doc-review', 'cordis-review'],
+  )
+  assert.ok(listed.every((skill) => skill.rank === BUNDLED_SKILL_RANK))
+  assert.ok(listed.every((skill) => skill.invocation.modelInvocable && skill.invocation.userInvocable))
 })
 
-test('bundled skill carries its own rubric and names the one fetchable URL', async () => {
+test('cordis-review carries its own rubric and names the one fetchable URL', async () => {
   const skills = await discoverSkills(skillsDir)
-  const skill = skills[0]
+  const skill = skills.find((candidate) => candidate.name === 'cordis-review')
   assert.ok(skill)
   // The rubric must be present locally: it is the source of rules.
   assert.match(skill.content, /## Checklist/)

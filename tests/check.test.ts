@@ -136,13 +136,13 @@ test('skips node_modules', async () => {
   )
 })
 
-test('python inject via ast-grep when available', async () => {
+test('python inject when ast-grep is available', async () => {
   await withTree(
     {
       'src/plugin.py': "def apply(ctx):\n    ctx.jobs.run()\n",
     },
     async (root) => {
-      const hits = await check(root, { astGrep: true })
+      const hits = await check(root)
       assert.equal(hits.some((h) => h.tag === 'inject' && h.message.includes('jobs')), true)
     },
   )
@@ -155,7 +155,7 @@ test('python inject, comment ignored, declared keys clean', async () => {
         "inject = ['tools']\nctx.effect()\ndef apply(ctx):\n    ctx.tools.register()\n    # ctx.secrets.register()\n    ctx.jobs.run()\n",
     },
     async (root) => {
-      const hits = await check(root, { astGrep: true })
+      const hits = await check(root)
       assert.equal(hits.some((h) => h.tag === 'toplevel'), true)
       assert.equal(hits.some((h) => h.tag === 'inject' && h.message.includes('jobs')), true)
       assert.equal(hits.some((h) => h.message.includes('secrets')), false)
@@ -164,7 +164,7 @@ test('python inject, comment ignored, declared keys clean', async () => {
   )
 })
 
-test('astGrep false: covered file warns and takes the LLM fallback', async () => {
+test('engine missing: covered file warns and takes the LLM fallback', async () => {
   await withTree(
     {
       'src/plugin.py': 'def apply(ctx):\n    ctx.jobs.run()\n',
@@ -176,85 +176,33 @@ test('astGrep false: covered file warns and takes the LLM fallback', async () =>
         warnings.push(String(chunk))
         return true
       }) as typeof process.stderr.write
+      const path = process.env['PATH'] ?? ''
+      process.env['PATH'] = '/nonexistent'
       try {
-        const hits = await check(root, { astGrep: false })
+        const hits = await check(root)
         assert.equal(hits.length, 1)
         assert.equal(hits[0]?.tag, 'inject')
         assert.match(hits[0]?.message ?? '', /LLM fallback/)
         assert.ok(warnings.some((w) => w.includes('warning')))
       } finally {
         process.stderr.write = err
+        process.env['PATH'] = path
       }
     },
   )
 })
 
-test('astGrep true without the binary throws', async () => {
-  await withTree({ 'src/a.py': 'x = 1\n' }, async (root) => {
-    const path = process.env['PATH'] ?? ''
-    process.env['PATH'] = '/nonexistent'
-    try {
-      await assert.rejects(check(root, { astGrep: true }))
-    } finally {
-      process.env['PATH'] = path
-    }
-  })
-})
-
-test('zig has no ast-grep grammar: warning plus LLM fallback', async () => {
+test('non-TS: bare calls and underscore members are locals', async () => {
   await withTree(
     {
-      'src/a.zig': 'pub fn apply(ctx: Ctx) void { ctx.tools.register(); }\n',
+      'src/a.py': 'def apply(ctx):\n    ctx.snapshot()\n    ctx._undos.append(1)\n    ctx.do_thing()\n    ctx.jobs.run()\n',
     },
     async (root) => {
-      const hits = await check(root, { astGrep: true })
-      assert.equal(hits.length, 1)
-      assert.match(hits[0]?.message ?? '', /LLM fallback/)
+      const hits = await check(root)
+      assert.equal(hits.filter((h) => h.tag === 'inject').length, 1)
+      assert.ok(hits.every((h) => h.message.includes('jobs')))
     },
   )
-})
-
-test('polyglot inject via ast-grep kinds and patterns', async () => {
-  const files: Record<string, string> = {
-    'src/a.go': 'package p\nfunc apply(ctx Ctx) { ctx.Tools.Register() }\n',
-    'src/a.rs': 'fn apply(ctx: Ctx) { ctx.tools.register(); }\n',
-    'src/a.c': 'void apply(Ctx ctx) { ctx.tools.register(); }\n',
-    'src/a.cpp': 'void apply(Ctx* ctx) { ctx->jobs.run(); }\n',
-    'src/A.java': 'class A { void apply(Ctx ctx) { ctx.tools.register(); } }\n',
-    'src/a.lua': 'function apply(ctx) ctx.jobs.run() end\n',
-    'src/a.swift': 'func apply(ctx: Ctx) { ctx.jobs.run() }\n',
-    'src/a.scala': 'def apply(ctx: Ctx) = ctx.jobs.run()\n',
-    'src/a.dart': 'void apply(Ctx ctx) { ctx.jobs.run(); }\n',
-    'src/a.kt': 'fun apply(ctx: Ctx) { ctx.jobs.run() }\n',
-    'src/a.rb': 'def apply(ctx); ctx.jobs.run; end\n',
-    'src/a.php': '<?php function apply($ctx) { $ctx->jobs->run(); }\n',
-    'src/a.cs': 'class A { void Apply(Ctx ctx) { ctx.jobs.run(); } }\n',
-    'src/a.ex': 'defmodule M do\n  def apply(ctx), do: ctx.jobs.run()\nend\n',
-  }
-  await withTree(files, async (root) => {
-    const hits = await check(root, { astGrep: true })
-    const langs = new Set(hits.filter((h) => h.tag === 'inject').map((h) => h.file.split('.').pop()))
-    for (const ext of ['go', 'rs', 'c', 'cpp', 'java', 'lua', 'swift', 'scala', 'dart', 'kt', 'rb', 'php', 'cs', 'ex']) {
-      assert.ok(langs.has(ext), ext)
-    }
-  })
-})
-
-test('non-TS: bare calls and underscore members are locals', async () => {
-  const files: Record<string, string> = {
-    'src/a.py': 'def apply(ctx):\n    ctx.snapshot()\n    ctx._undos.append(1)\n    ctx.do_thing()\n    ctx.jobs.run()\n',
-    'src/a.c': 'void apply(Ctx ctx) {\n    ctx.snapshot();\n    ctx.jobs.run();\n}\n',
-    'src/a.cpp': 'void apply(Ctx* ctx) {\n    ctx->snapshot();\n    ctx->jobs->run();\n}\n',
-    'src/a.rs': 'fn apply(ctx: Ctx) {\n    ctx.snapshot();\n    ctx.jobs.run();\n}\n',
-    'src/A.java': 'class A { void apply(Ctx ctx) { ctx.snapshot(); ctx.jobs.run(); } }\n',
-    'src/a.lua': 'function lonely() ctx.snapshot() end\nfunction apply(ctx) ctx.jobs.run() end\n',
-    'src/a.swift': 'func apply(ctx: Ctx) { ctx.jobs.run() }\n',
-  }
-  await withTree(files, async (root) => {
-    const hits = await check(root, { astGrep: true })
-    assert.equal(hits.filter((h) => h.tag === 'inject').length, 7)
-    assert.ok(hits.every((h) => h.message.includes('jobs')))
-  })
 })
 
 test('skips generated and vendored dirs', async () => {
@@ -263,10 +211,10 @@ test('skips generated and vendored dirs', async () => {
     'node_modules/pkg/viol.ts': 'export default class S {}\nexport function apply() {}\n',
     '.next/cache/viol.ts': 'export default class S {}\nexport function apply() {}\n',
     '.venv/viol.py': 'ctx.effect()\n',
-    'target/viol.rs': 'fn f(ctx: Ctx) { ctx.jobs.run(); }\n',
+    'target/viol.py': 'ctx.effect()\n',
   }
   await withTree(files, async (root) => {
-    const hits = await check(root, { astGrep: true })
+    const hits = await check(root)
     assert.deepEqual(hits, [])
   })
 })
@@ -276,36 +224,11 @@ test('toplevel: braces in strings and comments do not corrupt depth', async () =
     {
       'src/a.py': 's = "{"\nctx.effect()\n',
       'src/b.ts': 'export function apply(ctx) {\n  ctx.tools.register(() => {})\n}\n// }\nctx.effect(() => () => {})\n',
-      'src/c.lua': 'function apply(ctx) ctx.jobs.run() end\nctx.effect()\n',
     },
     async (root) => {
-      const hits = await check(root, { astGrep: true })
+      const hits = await check(root)
       const tops = hits.filter((h) => h.tag === 'toplevel').map((h) => `${h.file}:${h.line}`)
-      assert.deepEqual(tops, ['src/a.py:2', 'src/b.ts:5', 'src/c.lua:2'])
-    },
-  )
-})
-
-test('zig via grammarConfig: analytic hits instead of LLM fallback', async () => {
-  const { access } = await import('node:fs/promises')
-  // Local-only registry (not vendored): skip loudly when absent.
-  const config = '/home/maci/Desktop/Projects/maci0/ast-grep-grammars/sgconfig.yml'
-  try {
-    await access(config)
-  } catch {
-    console.warn('skip: zig grammar registry not present at ' + config)
-    return
-  }
-  await withTree(
-    {
-      'src/a.zig': 'pub fn apply(ctx: Ctx) void {\n    ctx.jobs.run();\n}\n',
-    },
-    async (root) => {
-      const without = await check(root, { astGrep: true })
-      assert.match(without[0]?.message ?? '', /LLM fallback/)
-      const hits = await check(root, { astGrep: true, grammarConfig: config })
-      assert.ok(hits.some((h) => h.tag === 'inject' && h.message.includes('jobs')))
-      assert.ok(hits.every((h) => !h.message.includes('LLM fallback')))
+      assert.deepEqual(tops, ['src/a.py:2', 'src/b.ts:5'])
     },
   )
 })

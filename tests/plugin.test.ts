@@ -64,10 +64,12 @@ test('apply registers one skills provider when skills is injected', async () => 
   assert.equal(provider.name, 'cordis-review')
 
   const listed = await provider.list()
-  assert.equal(listed.length, 1)
-  const skill = listed[0]
+  assert.deepEqual(
+    listed.map((skill) => skill.name),
+    ['cordis-doc-review', 'cordis-review'],
+  )
+  const skill = listed.find((candidate) => candidate.name === 'cordis-review')
   assert.ok(skill)
-  assert.equal(skill.name, 'cordis-review')
   assert.equal(skill.invocation.userInvocable, true)
   assert.equal(skill.invocation.modelInvocable, true)
   assert.match(skill.description, /arXiv:2608\.25512/)
