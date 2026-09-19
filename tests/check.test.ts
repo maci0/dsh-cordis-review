@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { check } from '../src/check.ts'
@@ -92,6 +92,21 @@ test('toplevel: ctx.effect at module load', async () => {
     async (root) => {
       const hits = await check(root)
       assert.equal(hits.some((h) => h.tag === 'toplevel'), true)
+    },
+  )
+})
+
+test('toplevel: a bare register(…) at module load is caught, not inside apply', async () => {
+  await withTree(
+    {
+      'src/bare.ts': 'register("thing", handler)\n',
+      'src/scoped.ts': 'export function apply(ctx) {\n  register("thing", handler)\n}\n',
+    },
+    async (root) => {
+      const hits = await check(root)
+      const bare = hits.filter((h) => h.tag === 'toplevel')
+      assert.equal(bare.length, 1)
+      assert.equal(bare[0]?.file, 'src/bare.ts')
     },
   )
 })
@@ -231,6 +246,48 @@ test('toplevel: braces in strings and comments do not corrupt depth', async () =
       assert.deepEqual(tops, ['src/a.py:2', 'src/b.ts:5'])
     },
   )
+})
+
+/**
+ * Work counter for the scan: how many `ast-grep scan` processes one `check()`
+ * starts. Deterministic (a count, not a clock) and engine-independent — a
+ * shell shim on PATH logs each spawn, so this holds on a machine without
+ * ast-grep and on a loaded CI runner alike.
+ *
+ * The scan groups files by language *before* chunking. Chunking first paid
+ * `ceil(files / chunk) × languages` spawns on a mixed tree; this tree has
+ * three languages and 300 files, so the pre-fix order cost 18 spawns and the
+ * language-first order costs 3. Every spawn re-parses a rule doc and starts a
+ * process, and it was ~95% of the scan's retired instructions.
+ */
+test('shells out once per language, not once per chunk per language', async () => {
+  const files: Record<string, string> = {}
+  for (let i = 0; i < 120; i += 1) files[`src/t${i}.ts`] = 'export const x = 1\n'
+  for (let i = 0; i < 120; i += 1) files[`src/j${i}.js`] = 'export const x = 1\n'
+  for (let i = 0; i < 60; i += 1) files[`src/p${i}.py`] = 'inject = []\n'
+
+  await withTree(files, async (root) => {
+    const bin = await mkdtemp(join(tmpdir(), 'dsh-cordis-shim-'))
+    const log = join(bin, 'spawns.log')
+    try {
+      await writeFile(
+        join(bin, 'ast-grep'),
+        `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "ast-grep 0.0.0"; exit 0; fi\nprintf 'scan\\n' >> "${log}"\necho '[]'\n`,
+        { mode: 0o755 },
+      )
+      const path = process.env['PATH'] ?? ''
+      process.env['PATH'] = `${bin}:${path}`
+      try {
+        await check(root)
+      } finally {
+        process.env['PATH'] = path
+      }
+      const spawned = (await readFile(log, 'utf8')).trim().split('\n').filter(Boolean).length
+      assert.equal(spawned, 3)
+    } finally {
+      await rm(bin, { recursive: true, force: true })
+    }
+  })
 })
 
 test('this plugin is clean apart from its two alternative install rows', async () => {

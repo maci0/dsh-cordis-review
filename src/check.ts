@@ -135,11 +135,83 @@ function continuedAccess(line: string, alias: string, key: string): boolean {
 }
 
 /**
+ * Rule bodies every script grammar shares, as `[id base, body]`. The
+ * `language:` token and the `-<suffix>` every id carries both come from
+ * {@link SCRIPT_LANGS}, so the TypeScript, JavaScript and JSX documents render
+ * from this one list and a rule can never drift between them.
+ */
+const SCRIPT_RULES: readonly (readonly [string, string])[] = [
+  ['u-def', String.raw`rule:
+  pattern: "export default $X"`],
+  ['u-fn', String.raw`rule:
+  pattern: "export function $N($$$ARGS) { $$$BODY }"`],
+  ['u-const', String.raw`rule:
+  pattern: "export const $N = $V"`],
+  ['u-const-typed', String.raw`rule:
+  pattern: "export const $N: $T = $V"`],
+  ['u-named', String.raw`rule:
+  pattern: "export { $X }"`],
+  ['u-decl', String.raw`rule:
+  pattern: "export const inject = $V"`],
+  ['u-decl-bare', String.raw`rule:
+  pattern: "inject = $V"`],
+  ['m', String.raw`rule:
+  all:
+    - pattern: "$C.$K"
+    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"`],
+  ['t', String.raw`rule:
+  all:
+    - pattern: "$C.$M($$$ARGS)"
+    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
+    - not:
+        inside:
+          any:
+            - kind: function_declaration
+            - kind: arrow_function
+            - kind: function_expression
+            - kind: method_definition`],
+  ['t-bare', String.raw`rule:
+  all:
+    - pattern: "register($$$ARGS)"
+    - not:
+        inside:
+          any:
+            - kind: function_declaration
+            - kind: arrow_function
+            - kind: function_expression
+            - kind: method_definition`],
+  ['u-get', String.raw`rule:
+  all:
+    - pattern: "$C.get($$$ARGS)"
+    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"`],
+  ['u-inject', String.raw`rule:
+  all:
+    - pattern: "$C.inject($$$ARGS)"
+    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"`],
+]
+
+/** Script grammar → the id suffix its rules carry. Declaration order is the scan order. */
+const SCRIPT_LANGS = { typescript: 'ts', javascript: 'js', tsx: 'tsx' } as const
+
+/** One `ast-grep` document for one script grammar: every {@link SCRIPT_RULES} body under its own id. */
+function scriptDoc(language: keyof typeof SCRIPT_LANGS): string {
+  return SCRIPT_RULES.map(([id, body]) => `id: ${id}-${SCRIPT_LANGS[language]}\nlanguage: ${language}\n${body}`).join('\n---\n')
+}
+
+/** Rule-id suffixes of {@link SCRIPT_LANGS}. */
+const SCRIPT_SUFFIXES: readonly string[] = Object.values(SCRIPT_LANGS)
+
+/** One rule id per script grammar. */
+function scriptIds(base: string): string[] {
+  return SCRIPT_SUFFIXES.map((suffix) => `${base}-${suffix}`)
+}
+
+/**
  * One static multi-rule document per language, fed to `ast-grep scan
  * --inline-rules`. One engine spawn covers every file of the language.
  * Rule order is load-bearing only for readability — matches carry ruleId, so
  * evaluation order never changes output. Keep the member/call/toplevel triple
- * together per language when adding rules.
+ * together when adding a rule.
  */
 const SG_DOC: Record<string, string> = {
   yaml: String.raw`id: u-id
@@ -147,245 +219,9 @@ language: yaml
 rule:
   pattern: "id: $ID"
 `,
-  typescript: String.raw`id: u-def
-language: typescript
-rule:
-  pattern: "export default $X"
----
-id: u-fn
-language: typescript
-rule:
-  pattern: "export function $N($$$ARGS) { $$$BODY }"
----
-id: u-const
-language: typescript
-rule:
-  pattern: "export const $N = $V"
----
-id: u-const-typed
-language: typescript
-rule:
-  pattern: "export const $N: $T = $V"
----
-id: u-named
-language: typescript
-rule:
-  pattern: "export { $X }"
----
-id: u-decl
-language: typescript
-rule:
-  pattern: "export const inject = $V"
----
-id: u-decl-bare
-language: typescript
-rule:
-  pattern: "inject = $V"
----
-id: m-ts
-language: typescript
-rule:
-  all:
-    - pattern: "$C.$K"
-    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
----
-id: t-ts
-language: typescript
-rule:
-  all:
-    - pattern: "$C.$M($$$ARGS)"
-    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
-    - not:
-        inside:
-          any:
-            - kind: function_declaration
-            - kind: arrow_function
-            - kind: function_expression
-            - kind: method_definition
----
-id: t-bare-ts
-language: typescript
-rule:
-  all:
-    - pattern: "register($$$ARGS)"
-    - not:
-        inside:
-          any:
-            - kind: function_declaration
-            - kind: arrow_function
-            - kind: function_expression
-            - kind: method_definition
----
-id: u-get-ts
-language: typescript
-rule:
-  all:
-    - pattern: "$C.get($$$ARGS)"
-    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
----
-id: u-inject-ts
-language: typescript
-rule:
-  all:
-    - pattern: "$C.inject($$$ARGS)"
-    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
-`,
-  javascript: String.raw`id: u-def-js
-language: javascript
-rule:
-  pattern: "export default $X"
----
-id: u-fn-js
-language: javascript
-rule:
-  pattern: "export function $N($$$ARGS) { $$$BODY }"
----
-id: u-const-js
-language: javascript
-rule:
-  pattern: "export const $N = $V"
----
-id: u-named-js
-language: javascript
-rule:
-  pattern: "export { $X }"
----
-id: u-decl-js
-language: javascript
-rule:
-  pattern: "export const inject = $V"
----
-id: u-decl-bare-js
-language: javascript
-rule:
-  pattern: "inject = $V"
----
-id: m-js
-language: javascript
-rule:
-  all:
-    - pattern: "$C.$K"
-    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
----
-id: t-js
-language: javascript
-rule:
-  all:
-    - pattern: "$C.$M($$$ARGS)"
-    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
-    - not:
-        inside:
-          any:
-            - kind: function_declaration
-            - kind: arrow_function
-            - kind: function_expression
-            - kind: method_definition
----
-id: t-bare-js
-language: javascript
-rule:
-  all:
-    - pattern: "register($$$ARGS)"
-    - not:
-        inside:
-          any:
-            - kind: function_declaration
-            - kind: arrow_function
-            - kind: function_expression
-            - kind: method_definition
----
-id: u-get-js
-language: javascript
-rule:
-  all:
-    - pattern: "$C.get($$$ARGS)"
-    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
----
-id: u-inject-js
-language: javascript
-rule:
-  all:
-    - pattern: "$C.inject($$$ARGS)"
-    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
-`,
-  tsx: String.raw`id: u-def-tsx
-language: tsx
-rule:
-  pattern: "export default $X"
----
-id: u-fn-tsx
-language: tsx
-rule:
-  pattern: "export function $N($$$ARGS) { $$$BODY }"
----
-id: u-const-tsx
-language: tsx
-rule:
-  pattern: "export const $N = $V"
----
-id: u-named-tsx
-language: tsx
-rule:
-  pattern: "export { $X }"
----
-id: u-decl-tsx
-language: tsx
-rule:
-  pattern: "export const inject = $V"
----
-id: u-decl-bare-tsx
-language: tsx
-rule:
-  pattern: "inject = $V"
----
-id: m-tsx
-language: tsx
-rule:
-  all:
-    - pattern: "$C.$K"
-    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
----
-id: t-tsx
-language: tsx
-rule:
-  all:
-    - pattern: "$C.$M($$$ARGS)"
-    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
-    - not:
-        inside:
-          any:
-            - kind: function_declaration
-            - kind: arrow_function
-            - kind: function_expression
-            - kind: method_definition
----
-id: t-bare-tsx
-language: tsx
-rule:
-  all:
-    - pattern: "register($$$ARGS)"
-    - not:
-        inside:
-          any:
-            - kind: function_declaration
-            - kind: arrow_function
-            - kind: function_expression
-            - kind: method_definition
----
-id: u-get-tsx
-language: tsx
-rule:
-  all:
-    - pattern: "$C.get($$$ARGS)"
-    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
----
-id: u-inject-tsx
-language: tsx
-rule:
-  all:
-    - pattern: "$C.inject($$$ARGS)"
-    - regex: "^\\$?(ctx|scope|hostCtx|context)\\b"
-`,
+  typescript: scriptDoc('typescript'),
+  javascript: scriptDoc('javascript'),
+  tsx: scriptDoc('tsx'),
   python: String.raw`id: u-decl-py
 language: python
 rule:
@@ -572,29 +408,28 @@ interface SgHit {
   readonly metaVariables?: { readonly single?: Record<string, { readonly text?: string }> }
 }
 
+/** `spawnSync` stdout ceiling for one `ast-grep scan` (see {@link MAX_PATHS}). */
+const MAX_OUTPUT = 32 * 1024 * 1024
+
+/**
+ * Paths per `ast-grep` spawn. Bounds argv size and keeps the batch's JSON
+ * stdout inside {@link MAX_OUTPUT} (measured ~14KB per file on ordinary
+ * sources, worst case ~0.5MB on dense ones). A single file with more than
+ * {@link MAX_OUTPUT} of matches still overflows its batch — that is ~100k
+ * matches in one file, not a real tree.
+ * ponytail: fixed chunks; stream stdout to disk if a real tree ever hits the ceiling.
+ */
+const MAX_PATHS = 200
+
 /** `ast-grep scan` spawns over every covered file: hits, [] on no match, undefined on engine failure. */
 function sgScanAll(files: readonly string[]): SgHit[] | undefined {
   if (files.length === 0) return []
-  // One spawn per 50 files: bounds argv size and keeps each batch's JSON
-  // stdout inside maxBuffer (dense trees emit ~0.5MB/file). A single file
-  // with >32MB of matches still overflows its batch — that is ~100k matches
-  // in one file, not a real tree.
-  // ponytail: fixed chunks; stream stdout to disk if a real tree ever hits the ceiling.
-  const out: SgHit[] = []
-  for (let index = 0; index < files.length; index += 50) {
-    const batch = sgScanBatch(files.slice(index, index + 50))
-    if (batch === undefined) return undefined
-    out.push(...batch)
-  }
-  return out
-}
-
-/** One bounded `ast-grep scan` spawn. */
-function sgScanBatch(files: readonly string[]): SgHit[] | undefined {
-  // One spawn per language present: the engine evaluates every rule in the
-  // doc against every file, so a single multi-language doc costs per-file
-  // eval time linear in rule count. Per-language docs keep each spawn's rule
-  // set small.
+  // Group by language *before* chunking. The engine evaluates every rule in
+  // the doc against every file, so one multi-language doc costs per-file eval
+  // time linear in rule count; per-language docs keep each spawn's rule set
+  // small. Chunking first pays the engine's startup once per (chunk ×
+  // language present) — on a mixed tree that is one spawn per language per
+  // 50 files instead of one per language per 200, for no gain.
   const byLang = new Map<string, string[]>()
   for (const file of files) {
     const lang = LANGUAGE[extname(file).toLowerCase()]
@@ -607,22 +442,30 @@ function sgScanBatch(files: readonly string[]): SgHit[] | undefined {
   for (const [lang, langFiles] of byLang) {
     const doc = SG_DOC[lang]
     if (doc === undefined) continue
-    const result = spawnSync('ast-grep', ['scan', '--inline-rules', doc, '--json=compact', ...langFiles], {
-      encoding: 'utf8',
-      maxBuffer: 32 * 1024 * 1024,
-    })
-    if (result.status !== 0) return undefined
-    const stdout = result.stdout.trim()
-    if (stdout === '') continue
-    try {
-      const parsed = JSON.parse(stdout) as unknown
-      if (Array.isArray(parsed)) out.push(...(parsed as SgHit[]))
-      else return undefined
-    } catch {
-      return undefined
+    for (let index = 0; index < langFiles.length; index += MAX_PATHS) {
+      const batch = sgScanBatch(doc, langFiles.slice(index, index + MAX_PATHS))
+      if (batch === undefined) return undefined
+      out.push(...batch)
     }
   }
   return out
+}
+
+/** One bounded `ast-grep scan` spawn. */
+function sgScanBatch(doc: string, files: readonly string[]): SgHit[] | undefined {
+  const result = spawnSync('ast-grep', ['scan', '--inline-rules', doc, '--json=compact', ...files], {
+    encoding: 'utf8',
+    maxBuffer: MAX_OUTPUT,
+  })
+  if (result.status !== 0) return undefined
+  const stdout = result.stdout.trim()
+  if (stdout === '') return []
+  try {
+    const parsed = JSON.parse(stdout) as unknown
+    return Array.isArray(parsed) ? (parsed as SgHit[]) : undefined
+  } catch {
+    return undefined
+  }
 }
 
 function meta(hit: SgHit, name: string): string {
@@ -734,12 +577,12 @@ function getReads(byRule: ReadonlyMap<string, readonly SgHit[]>): Set<string> {
 }
 
 function sgScript(rel: string, byRule: ReadonlyMap<string, readonly SgHit[]>, text: string): Finding[] {
-  const defs = [...(byRule.get('u-def') ?? []), ...(byRule.get('u-def-js') ?? []), ...(byRule.get('u-def-tsx') ?? [])]
+  const defs = scriptIds('u-def').flatMap((id) => byRule.get(id) ?? [])
   if (defs.length === 0) {
-    return sgMembersAndToplevel(rel, byRule, text, false, 'm-ts', 'm-js', 'm-tsx', 't-ts', 't-js', 't-tsx')
+    return sgMembersAndToplevel(rel, byRule, text, false, ...scriptIds('m'), ...scriptIds('t'), ...scriptIds('t-bare'))
   }
   const names = new Set<string>()
-  for (const id of ['u-fn', 'u-fn-js', 'u-fn-tsx', 'u-const', 'u-const-js', 'u-const-tsx', 'u-const-typed', 'u-named', 'u-named-js', 'u-named-tsx']) {
+  for (const id of [...scriptIds('u-fn'), ...scriptIds('u-const'), ...scriptIds('u-const-typed'), ...scriptIds('u-named')]) {
     for (const hit of byRule.get(id) ?? []) {
       for (const slot of ['N', 'X'] as const) {
         for (const part of meta(hit, slot).split(',')) {
@@ -761,7 +604,7 @@ function sgScript(rel: string, byRule: ReadonlyMap<string, readonly SgHit[]>, te
         ]
       : []
 
-  return findings.concat(sgMembersAndToplevel(rel, byRule, text, false, 'm-ts', 'm-js', 'm-tsx', 't-ts', 't-js', 't-tsx'))
+  return findings.concat(sgMembersAndToplevel(rel, byRule, text, false, ...scriptIds('m'), ...scriptIds('t'), ...scriptIds('t-bare')))
 }
 
 /** Shared inject + toplevel pass over one scan's member/call matches. */

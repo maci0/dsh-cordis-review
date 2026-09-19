@@ -12,8 +12,8 @@
 
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { Context } from '@deepseek-ai/cordis'
 import { createSkillProvider } from './skills.ts'
-import type { HostContext } from './host.ts'
 
 /** Plugin name as it appears in the loader. */
 export const name = 'cordis-review'
@@ -22,13 +22,13 @@ export const name = 'cordis-review'
  * Mount the plugin.
  * @param ctx - the host context.
  */
-export function apply(ctx: HostContext): void {
+export function apply(ctx: Context): void {
   const skillsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'skills')
   const warn = (message: string): void => {
     console.warn(`[cordis-review] ${message}`)
   }
 
   ctx.inject(['skills'], (scope) => {
-    scope.skills?.registerProvider(() => createSkillProvider({ skillsDir, onWarn: warn }))
+    scope.skills.registerProvider(() => createSkillProvider({ skillsDir, onWarn: warn }))
   })
 }

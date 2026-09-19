@@ -18,7 +18,8 @@ import type {
   SkillProvider,
   SkillSummary,
 } from '@deepseek-ai/dsh-skill'
-import { parseFrontmatter } from './frontmatter.ts'
+import { parseFrontmatter, parseFrontmatterWithYaml } from './frontmatter.ts'
+import type { Frontmatter } from './frontmatter.ts'
 
 /**
  * Rank matching a harness bundled skill, re-exported from the registry so a
@@ -87,9 +88,11 @@ async function readSkillFile(
     return undefined
   }
 
-  let parsed: ReturnType<typeof parseFrontmatter>
+  let parsed: Frontmatter
   try {
-    parsed = parseFrontmatter(source)
+    // The flat reader covers every header this package ships. Its refusal is
+    // what selects the real YAML parser, so the fallback stays the contract.
+    parsed = parseFrontmatter(source) ?? await parseFrontmatterWithYaml(source)
   } catch (error) {
     onWarn?.(`skipping ${path}: ${error instanceof Error ? error.message : String(error)}`)
     return undefined

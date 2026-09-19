@@ -3,7 +3,6 @@ import { test } from 'node:test'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SkillProvider } from '@deepseek-ai/dsh-skill'
 import { apply, name } from '../src/index.ts'
-import type { HostContext } from '../src/host.ts'
 import type { createSkillProvider } from '../src/skills.ts'
 
 /** The provider `apply` registers, at the concrete type this package builds. */
@@ -15,12 +14,12 @@ interface Captured {
   dispose: () => void
 }
 
-function createHost(): { ctx: HostContext; captured: Captured } {
+function createHost(): { ctx: Context; captured: Captured } {
   const captured: Captured = { providers: [], injects: [], dispose: () => {} }
 
   // The mock covers the two calls `apply` makes; the fiber the real
   // `ctx.inject` returns is not part of the behavior under test.
-  const inject = ((dependencies: readonly string[], callback: (scope: HostContext) => void) => {
+  const inject = ((dependencies: readonly string[], callback: (scope: Context) => void) => {
     captured.injects.push([...dependencies])
     const nested: Array<() => void> = []
     const scope = {
@@ -37,7 +36,7 @@ function createHost(): { ctx: HostContext; captured: Captured } {
           return dispose
         },
       },
-    } as unknown as HostContext
+    } as unknown as Context
     callback(scope)
     const dispose = (): void => {
       for (const inner of nested.reverse()) inner()
@@ -46,7 +45,9 @@ function createHost(): { ctx: HostContext; captured: Captured } {
     return dispose
   }) as unknown as Context['inject']
 
-  return { ctx: { inject }, captured }
+  // The mock covers the one call `apply` makes; the rest of `Context` is not
+  // part of the behavior under test.
+  return { ctx: { inject } as unknown as Context, captured }
 }
 
 test('plugin name is the loader id', () => {

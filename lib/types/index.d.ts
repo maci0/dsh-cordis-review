@@ -9,11 +9,11 @@
  *
  * @module dsh-cordis-review
  */
-import type { HostContext } from './host.ts';
+import type { Context } from '@deepseek-ai/cordis';
 /** Plugin name as it appears in the loader. */
 export declare const name = "cordis-review";
 /**
  * Mount the plugin.
  * @param ctx - the host context.
  */
-export declare function apply(ctx: HostContext): void;
+export declare function apply(ctx: Context): void;

@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { Context } from '@deepseek-ai/cordis'
 import SkillRegistry from '@deepseek-ai/dsh-skill'
-import type { HostContext } from '../src/host.ts'
 import * as plugin from '../src/index.ts'
 
 test('a real cordis composition mounts the bundled skill and disposes it', async () => {
@@ -11,7 +10,7 @@ test('a real cordis composition mounts the bundled skill and disposes it', async
 
   const fiber = await ctx.plugin({
     name: plugin.name,
-    apply: (scope) => plugin.apply(scope as unknown as HostContext),
+    apply: (scope) => plugin.apply(scope),
   })
 
   const summaries = await ctx.skills.list()
