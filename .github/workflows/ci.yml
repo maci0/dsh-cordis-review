@@ -28,6 +28,10 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci --no-audit --no-fund
+      # The scan shells out to ast-grep; without it every file takes the
+      # LLM-fallback path and the scan assertions cannot pass.
+      - run: npm install -g @ast-grep/cli@0.44.1
+      - run: ast-grep --version
       - run: npm run typecheck --if-present
       - run: npm run build --if-present
       - run: npm test --if-present
