@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "CORDIS review",
+    "description": "Review a codebase against the CORDIS paper and apply the fixes that apply."
+  }
+}
