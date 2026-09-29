@@ -171,6 +171,23 @@ test('frontmatter invocation controls project into the policy booleans', async (
   }
 })
 
+test('a skill that omits name loads under its directory name', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-cordis-review-'))
+  try {
+    await mkdir(join(dir, 'no-name'))
+    await writeFile(join(dir, 'no-name', 'SKILL.md'), '---\ndescription: A usable description.\n---\nbody\n')
+    const provider = createSkillProvider({ skillsDir: dir })
+    const listed = await provider.list()
+    assert.equal(listed.length, 1)
+    assert.equal(listed[0]?.name, 'no-name')
+    const loaded = await provider.get(listed[0]!)
+    assert.equal(loaded?.name, 'no-name')
+    assert.equal(loaded?.content, 'body')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('list and get settle promptly when the lookup signal is aborted', async () => {
   const provider = createSkillProvider({ skillsDir })
   const controller = new AbortController()

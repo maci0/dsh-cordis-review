@@ -111,6 +111,46 @@ test('toplevel: a bare register(…) at module load is caught, not inside apply'
   )
 })
 
+test('toplevel: a Python effect inside a function is not module load', async () => {
+  await withTree(
+    {
+      'src/eff.py': 'def apply(ctx):\n    ctx.effect(() => None)\n',
+    },
+    async (root) => {
+      const hits = await check(root)
+      assert.equal(hits.some((h) => h.tag === 'toplevel'), false)
+    },
+  )
+})
+
+test('toplevel: a bare register(…) at module load is caught in Python too', async () => {
+  await withTree(
+    {
+      'src/bare.py': 'register("thing", handler)\n',
+      'src/scoped.py': 'def apply(ctx):\n    register("thing", handler)\n',
+    },
+    async (root) => {
+      const hits = await check(root)
+      const bare = hits.filter((h) => h.tag === 'toplevel')
+      assert.equal(bare.length, 1)
+      assert.equal(bare[0]?.file, 'src/bare.py')
+    },
+  )
+})
+
+test('inject: ctx.inject widens a callback written on the same line', async () => {
+  await withTree(
+    {
+      'src/index.ts':
+        "export function apply(ctx) {\n  ctx.inject(['skills'], (scope) => scope.skills.registerProvider(() => ({})))\n}\n",
+    },
+    async (root) => {
+      const hits = await check(root)
+      assert.equal(hits.some((h) => h.tag === 'inject'), false)
+    },
+  )
+})
+
 test('id: duplicate Loader ids across yaml files', async () => {
   await withTree(
     {

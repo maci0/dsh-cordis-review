@@ -135,6 +135,10 @@ function continuedAccess(line: string, alias: string, key: string): boolean {
 }
 
 /**
+ * `stopBy: end` on every `inside` guard is load-bearing: ast-grep's default
+ * `stopBy: neighbor` inspects only the immediate parent, so the guard matched
+ * nothing (a Python call sits under an `expression_statement`).
+ *
  * Rule bodies every script grammar shares, as `[id base, body]`. The
  * `language:` token and the `-<suffix>` every id carries both come from
  * {@link SCRIPT_LANGS}, so the TypeScript, JavaScript and JSX documents render
@@ -169,7 +173,8 @@ const SCRIPT_RULES: readonly (readonly [string, string])[] = [
             - kind: function_declaration
             - kind: arrow_function
             - kind: function_expression
-            - kind: method_definition`],
+            - kind: method_definition
+          stopBy: end`],
   ['t-bare', String.raw`rule:
   all:
     - pattern: "register($$$ARGS)"
@@ -179,7 +184,8 @@ const SCRIPT_RULES: readonly (readonly [string, string])[] = [
             - kind: function_declaration
             - kind: arrow_function
             - kind: function_expression
-            - kind: method_definition`],
+            - kind: method_definition
+          stopBy: end`],
   ['u-get', String.raw`rule:
   all:
     - pattern: "$C.get($$$ARGS)"
@@ -245,6 +251,7 @@ rule:
           any:
             - kind: function_definition
             - kind: lambda
+          stopBy: end
 ---
 id: t-bare-py
 language: python
@@ -256,6 +263,7 @@ rule:
           any:
             - kind: function_definition
             - kind: lambda
+          stopBy: end
 ---
 id: u-get-py
 language: python
@@ -352,7 +360,7 @@ export async function check(root: string): Promise<readonly Finding[]> {
       continue
     }
     const text = await readFile(abs, 'utf8')
-    findings.push(...sgMembersAndToplevel(rel, byRule, text, true, 'm-py', 't-py'))
+    findings.push(...sgMembersAndToplevel(rel, byRule, text, true, 'm-py', 't-py', 't-bare-py'))
   }
 
   return findings.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.tag.localeCompare(b.tag))
@@ -716,7 +724,10 @@ function* codeBraces(line: string): Generator<string> {
   }
 }
 
-/** True when an enclosing ctx.inject call widens this alias+key. */
+/**
+ * True when a ctx.inject call widens this alias+key. `<=` because the
+ * callback may open on the same line as the call itself.
+ */
 function widened(
   widens: ReadonlyMap<number, { alias: string; keys: readonly string[] }>,
   line: number,
@@ -724,7 +735,7 @@ function widened(
   key: string,
 ): boolean {
   for (const [start, widen] of widens) {
-    if (start < line && widen.alias === alias && widen.keys.includes(key)) return true
+    if (start <= line && widen.alias === alias && widen.keys.includes(key)) return true
   }
   return false
 }
