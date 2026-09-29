@@ -149,6 +149,15 @@ const SCRIPT_RULES: readonly (readonly [string, string])[] = [
   pattern: "export default $X"`],
   ['u-fn', String.raw`rule:
   pattern: "export function $N($$$ARGS) { $$$BODY }"`],
+  // TS return-type annotation: shape-exact `$N($$$ARGS) {` misses the `: $T`
+  // between parameters and body, and every real plugin here writes it.
+  ['u-fn-typed', String.raw`rule:
+  pattern: "export function $N($$$ARGS): $T { $$$BODY }"`],
+  // Generic type parameters sit in the same slot as the return type: `apply<T>`.
+  ['u-fn-generic', String.raw`rule:
+  pattern: "export function $N<$T>($$$ARGS) { $$$BODY }"`],
+  ['u-fn-generic-typed', String.raw`rule:
+  pattern: "export function $N<$T>($$$ARGS): $U { $$$BODY }"`],
   ['u-const', String.raw`rule:
   pattern: "export const $N = $V"`],
   ['u-const-typed', String.raw`rule:
@@ -157,6 +166,9 @@ const SCRIPT_RULES: readonly (readonly [string, string])[] = [
   pattern: "export { $X }"`],
   ['u-decl', String.raw`rule:
   pattern: "export const inject = $V"`],
+  // Same shape miss on the declaration side: `export const inject: string[] = […]`.
+  ['u-decl-typed', String.raw`rule:
+  pattern: "export const inject: $T = $V"`],
   ['u-decl-bare', String.raw`rule:
   pattern: "inject = $V"`],
   ['m', String.raw`rule:
@@ -496,7 +508,11 @@ function memberKeyFromText(text: string): { alias: string; key: string } | undef
 
 function keysFromValue(value: string): string[] {
   const out: string[] = []
-  for (const part of value.replace(/^\s*[[{]/, '').replace(/[\]}]\s*$/, '').split(',')) {
+  // Read the bracketed group itself, not "value minus its last ]": a trailing
+  // `as const` / `satisfies T` after the closing bracket otherwise poisons the
+  // final key (`'skills'] as const` fails IDENT and the key is lost).
+  const inner = /^\s*[[{]([^\]}]*)[\]}]/.exec(value)?.[1] ?? value
+  for (const part of inner.split(',')) {
     const token = part.trim().replace(/^['"`]|['"`]$/g, '')
     if (IDENT.test(token)) out.push(token)
   }
@@ -590,8 +606,11 @@ function sgScript(rel: string, byRule: ReadonlyMap<string, readonly SgHit[]>, te
     return sgMembersAndToplevel(rel, byRule, text, false, ...scriptIds('m'), ...scriptIds('t'), ...scriptIds('t-bare'))
   }
   const names = new Set<string>()
-  for (const id of [...scriptIds('u-fn'), ...scriptIds('u-const'), ...scriptIds('u-const-typed'), ...scriptIds('u-named')]) {
-    for (const hit of byRule.get(id) ?? []) {
+  // Derive from the rule ids, not a hand-kept list: every export shape added to
+  // SCRIPT_RULES then counts, instead of silently dropping out of mix-export.
+  for (const [id, hits] of byRule) {
+    if (!/^u-(?:fn|const|named)-/.test(id)) continue
+    for (const hit of hits) {
       for (const slot of ['N', 'X'] as const) {
         for (const part of meta(hit, slot).split(',')) {
           const token = part.trim().split(/\s+as\s+/).pop()?.trim() ?? ''

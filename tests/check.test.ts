@@ -31,6 +31,51 @@ test('mix-export: default plus named apply', async () => {
   )
 })
 
+test('mix-export: a named apply with a return type still mixes', async () => {
+  // Every TS plugin in this workspace writes `export function apply(ctx: HostContext, config: Config): void`;
+  // the shape-exact u-fn pattern missed the return-type annotation, so the
+  // mixed-export warning (SKILL.md `mix-export`) never fired on real code.
+  await withTree(
+    {
+      'src/index.ts':
+        'export default class S {}\nexport function apply(ctx: HostContext, config: Config): void {}\n',
+    },
+    async (root) => {
+      const hits = await check(root)
+      assert.equal(hits.some((h) => h.tag === 'mix-export'), true)
+    },
+  )
+})
+
+test('mix-export: a generic named apply still mixes', async () => {
+  await withTree(
+    {
+      'src/generic.ts': 'export default class S {}\nexport function apply<T>(ctx: T) {}\n',
+      'src/generic-typed.ts': 'export default class S {}\nexport function apply<T>(ctx: T): void {}\n',
+    },
+    async (root) => {
+      const hits = await check(root)
+      const mixed = hits.filter((h) => h.tag === 'mix-export').map((h) => h.file).sort()
+      assert.deepEqual(mixed, ['src/generic-typed.ts', 'src/generic.ts'])
+    },
+  )
+})
+
+test('inject: a typed or `as const` inject declaration is still a declaration', async () => {
+  await withTree(
+    {
+      'src/typed.ts':
+        "export const inject: string[] = ['tools']\nexport function apply(ctx) {\n  ctx.tools.register(() => {})\n}\n",
+      'src/const.ts':
+        "export const inject = ['skills'] as const\nexport function apply(ctx) {\n  ctx.skills.register(() => {})\n}\n",
+    },
+    async (root) => {
+      const hits = await check(root)
+      assert.deepEqual(hits, [])
+    },
+  )
+})
+
 test('inject: ctx.foo without inject declaration', async () => {
   await withTree(
     {
