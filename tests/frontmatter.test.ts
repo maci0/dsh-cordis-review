@@ -1,3 +1,4 @@
+import { candidatesOf } from './scratch.ts'
 /**
  * Regression table: the flat reader may only claim a frontmatter block whose
  * value is provably what `yaml` produces. Each case pins one divergence an
@@ -176,7 +177,7 @@ test('a CRLF skill still loads instead of being skipped', async () => {
     assert.deepEqual(warnings, [])
 
     const provider = createSkillProvider({ skillsDir: dir })
-    const listed = await provider.list()
+    const listed = candidatesOf(await provider.list())
     assert.deepEqual(listed.map((skill) => skill.name), ['crlf-skill'])
     const loaded = await provider.get(listed[0] as never)
     assert.ok(loaded, 'the CRLF skill was skipped end-to-end')

@@ -1,3 +1,4 @@
+import { candidatesOf } from './scratch.ts'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -114,7 +115,7 @@ test('bundled skills are discoverable and user-invocable', async () => {
 
   const provider = createSkillProvider({ skillsDir })
   assert.equal(provider.name, 'cordis-review')
-  const listed = await provider.list()
+  const listed = candidatesOf(await provider.list())
   assert.deepEqual(
     listed.map((skill) => skill.name),
     ['cordis-doc-review', 'cordis-review'],
@@ -154,7 +155,7 @@ test('frontmatter invocation controls project into the policy booleans', async (
       '---\nname: user-only\ndescription: >\n  A usable description.\nwhenToUse: when the runtime leaks ctx\ndisable-model-invocation: true\n---\nbody\n',
     )
     const provider = createSkillProvider({ skillsDir: dir })
-    const listed = await provider.list()
+    const listed = candidatesOf(await provider.list())
     const modelOnly = listed.find((entry) => entry.name === 'model-only')
     const userOnly = listed.find((entry) => entry.name === 'user-only')
     assert.deepEqual(modelOnly?.invocation, { modelInvocable: true, userInvocable: false })
@@ -188,7 +189,7 @@ test('invocation keys accept the harness boolean spellings and skip anything els
     await skill('bad-null', 'disable-model-invocation: null')
     await skill('legacy-camel', 'userInvocable: false')
     const warnings: string[] = []
-    const listed = await createSkillProvider({ skillsDir: dir, onWarn: (message) => warnings.push(message) }).list()
+    const listed = candidatesOf(await createSkillProvider({ skillsDir: dir, onWarn: (message) => warnings.push(message) }).list())
     const policy = Object.fromEntries(listed.map((entry) => [entry.name, entry.invocation]))
     const hidden = { modelInvocable: true, userInvocable: false }
     const manual = { modelInvocable: false, userInvocable: true }
@@ -232,7 +233,7 @@ test('a lookup aborted mid-read settles without a warning', async () => {
   const listing = provider.list({ signal: controller.signal })
   controller.abort()
   await listing
-  const candidate = (await provider.list())[0]
+  const candidate = (candidatesOf(await provider.list()))[0]
   assert.ok(candidate)
   const second = new AbortController()
   const loading = provider.get(candidate, { signal: second.signal })
@@ -247,7 +248,7 @@ test('a skill that omits name loads under its directory name', async () => {
     await mkdir(join(dir, 'no-name'))
     await writeFile(join(dir, 'no-name', 'SKILL.md'), '---\ndescription: A usable description.\n---\nbody\n')
     const provider = createSkillProvider({ skillsDir: dir })
-    const listed = await provider.list()
+    const listed = candidatesOf(await provider.list())
     assert.equal(listed.length, 1)
     assert.equal(listed[0]?.name, 'no-name')
     const loaded = await provider.get(listed[0]!)
@@ -263,10 +264,10 @@ test('list and get settle promptly when the lookup signal is aborted', async () 
   const controller = new AbortController()
   controller.abort()
 
-  const listed = await provider.list({ signal: controller.signal })
+  const listed = candidatesOf(await provider.list({ signal: controller.signal }))
   assert.deepEqual(listed, [])
 
-  const live = await provider.list()
+  const live = candidatesOf(await provider.list())
   const candidate = live[0]
   assert.ok(candidate)
   assert.equal(await provider.get(candidate, { signal: controller.signal }), undefined)

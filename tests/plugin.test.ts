@@ -1,3 +1,4 @@
+import { candidatesOf } from './scratch.ts'
 import assert from 'node:assert/strict'
 import { cp, mkdir, mkdtemp, rm, symlink } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -68,7 +69,7 @@ test('apply registers one skills provider when skills is injected', async () => 
   assert.ok(provider)
   assert.equal(provider.name, 'cordis-review')
 
-  const listed = await provider.list()
+  const listed = candidatesOf(await provider.list())
   assert.deepEqual(
     listed.map((skill) => skill.name),
     ['cordis-doc-review', 'cordis-review'],
@@ -120,7 +121,7 @@ test('a skill discovery warning reaches the host logger, not the console', async
     }
     copy.apply({ inject: (_: readonly string[], callback: (inner: unknown) => void) => callback(scope) } as unknown as Context)
     assert.ok(provider)
-    await provider.list({})
+    candidatesOf(await provider.list({}))
 
     assert.equal(logged.length, 1)
     assert.match(logged[0] ?? '', /^\[cordis-review\] cannot read .*broken\/SKILL\.md/)

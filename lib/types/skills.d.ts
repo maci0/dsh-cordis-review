@@ -7,7 +7,7 @@
  * @module dsh-cordis-review/skills
  */
 import { BUNDLED_SKILL_RANK } from '@deepseek-ai/dsh-skill';
-import type { SkillCandidate, SkillDefinition, SkillInvocationPolicy, SkillLookupOptions } from '@deepseek-ai/dsh-skill';
+import type { SkillCandidate, SkillDefinition, SkillInvocationPolicy, SkillLookupOptions, SkillProviderObservation } from '@deepseek-ai/dsh-skill';
 /**
  * Rank matching a harness bundled skill, re-exported from the registry so a
  * project-level or user-level skill of the same name still wins the duplicate.
@@ -59,6 +59,6 @@ export declare function discoverSkills(skillsDir: string, onWarn?: (message: str
  */
 export declare function createSkillProvider(options: SkillProviderOptions): {
     name: string;
-    list(lookup?: SkillLookupOptions): Promise<readonly SkillCandidate[]>;
+    list(lookup?: SkillLookupOptions): Promise<readonly SkillCandidate[] | SkillProviderObservation>;
     get(candidate: SkillCandidate, lookup?: SkillLookupOptions): Promise<SkillDefinition | undefined>;
 };
