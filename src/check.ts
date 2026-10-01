@@ -72,7 +72,7 @@ const SCRIPT_LANGUAGES = new Set(['typescript', 'tsx', 'javascript'])
 /** Extensions whose text is read before scanning (only to skip browser bundles). */
 const SKIPPABLE = new Set(['.js', '.jsx', '.mjs', '.cjs'])
 
-/** Mixed onto every Cordis `ctx` — not services. */
+/** Mixed onto every Cordis `ctx`; not services. */
 const CTX_INTRINSICS = new Set([
   'accessor',
   'bail',
@@ -227,7 +227,7 @@ function scriptIds(base: string): string[] {
 /**
  * One static multi-rule document per language, fed to `ast-grep scan
  * --inline-rules`. One engine spawn covers every file of the language.
- * Rule order is load-bearing only for readability — matches carry ruleId, so
+ * Rule order is load-bearing only for readability: matches carry ruleId, so
  * evaluation order never changes output. Keep the member/call/toplevel triple
  * together when adding a rule.
  */
@@ -427,7 +427,7 @@ const MAX_OUTPUT = 32 * 1024 * 1024
  * Paths per `ast-grep` spawn. Bounds argv size and keeps the batch's JSON
  * stdout inside {@link MAX_OUTPUT} (measured ~14KB per file on ordinary
  * sources, worst case ~0.5MB on dense ones). A single file with more than
- * {@link MAX_OUTPUT} of matches still overflows its batch — that is ~100k
+ * {@link MAX_OUTPUT} of matches still overflows its batch; that is ~100k
  * matches in one file, not a real tree.
  * ponytail: fixed chunks; stream stdout to disk if a real tree ever hits the ceiling.
  */
@@ -440,7 +440,7 @@ function sgScanAll(files: readonly string[]): SgHit[] {
   // the doc against every file, so one multi-language doc costs per-file eval
   // time linear in rule count; per-language docs keep each spawn's rule set
   // small. Chunking first pays the engine's startup once per (chunk ×
-  // language present) — on a mixed tree that is one spawn per language per
+  // language present); on a mixed tree that is one spawn per language per
   // 50 files instead of one per language per 200, for no gain.
   const byLang = new Map<string, string[]>()
   for (const file of files) {
@@ -688,7 +688,7 @@ function sgMembersAndToplevel(
     }
   }
   // Toplevel = effect-shaped call at brace depth 0. ast-grep patterns cannot
-  // see depth, so depth stays a brace scan over ast-grep's own call lines —
+  // see depth, so depth stays a brace scan over ast-grep's own call lines:
   // the match set is ast-grep's, not a second engine. Bare `register(…)`
   // has no receiver; `registerX` methods match TOPLEVEL_VERB by prefix.
   // String/comment braces would corrupt depth, so count code braces only.

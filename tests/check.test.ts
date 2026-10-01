@@ -354,7 +354,7 @@ test('toplevel: a JS private member is code, not a comment', async () => {
 
 /**
  * Work counter for the scan: how many `ast-grep scan` processes one `check()`
- * starts. Deterministic (a count, not a clock) and engine-independent — a
+ * starts. Deterministic (a count, not a clock) and engine-independent: a
  * shell shim on PATH logs each spawn, so this holds on a machine without
  * ast-grep and on a loaded CI runner alike.
  *

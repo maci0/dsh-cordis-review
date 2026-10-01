@@ -1,11 +1,11 @@
 /**
- * dsh-cordis-review — `/cordis-review` as a DeepSeek Harness plugin.
+ * dsh-cordis-review: CORDIS review skills as a DeepSeek Harness plugin.
  *
- * One capability: the bundled `cordis-review` skill becomes a `ctx.skills`
- * provider, so it appears as `/cordis-review` in the composer (DSH's command
- * surface for user-invocable skills). The skill body is the source of truth
- * for reviewing a codebase against the CORDIS context paradigm
- * (arXiv:2608.25512) and applying the applicable fixes.
+ * One capability: every bundled `skills/<name>/SKILL.md` becomes a
+ * `ctx.skills` provider entry, so each appears as `/<name>` in the composer
+ * (DSH's command surface for user-invocable skills). `cordis-review` reviews
+ * a codebase against the CORDIS context paradigm (arXiv:2608.25512) and
+ * applies the fixes; `cordis-doc-review` writes and repairs the docs.
  *
  * @module dsh-cordis-review
  */

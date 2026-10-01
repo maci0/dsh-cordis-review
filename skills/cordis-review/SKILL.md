@@ -17,14 +17,14 @@ and **implement every applicable fix**. Report-only is failure. Skip a finding
 only when the paper's own system-boundary argument says the effect cannot be
 tracked.
 
-**This file is the checklist — start here.** It is the operational form of
+**This file is the checklist: start here.** It is the operational form of
 the paper and is sufficient to review and patch; the agent is not required to
 fetch anything before auditing.
 
-Paper fetch, if you want the abstract and exact metadata: the **abs page only**
-— <https://arxiv.org/abs/2608.25512> (HTTP 200). Do **not** try the PDF
+Paper fetch, if you want the abstract and exact metadata: the **abs page only**,
+<https://arxiv.org/abs/2608.25512> (HTTP 200). Do **not** try the PDF
 (`/pdf/2608.25512`: this harness rejects `application/pdf`) or an HTML
-rendering (`/html/2608.25512v1` is 404 — no HTML is published for this
+rendering (`/html/2608.25512v1` is 404: no HTML is published for this
 submission). The abstract is not the checklist: rules come from this file, not
 from a fetched page, and never from memory. The `§` numbers below are cited
 from the paper's section structure and were verified against it; do not
@@ -40,7 +40,7 @@ names (`ctx.effect`, `inject`, `ctx.get`, `apply`).
 1. **Scope.** Default: the current workspace. A `/cordis-review <path>`
    argument, if present, is the root. Do not wander into unrelated checkouts.
 2. **Get the rules.** Read this file's **Checklist** and **What the paper
-   requires** sections — that is the complete rubric, already loaded. If you
+   requires** sections: that is the complete rubric, already loaded. If you
    need the paper's abstract or exact metadata, `web_fetch` the abs page
    `https://arxiv.org/abs/2608.25512` (the only URL that works; the PDF is
    rejected and there is no HTML rendering). In DSH / `dsh-*` plugin
@@ -94,7 +94,7 @@ global leaks effects out of the owner's lifecycle and coeffects out of its
 
 The runtime does **not** prove that an inverse actually reverts, or that
 operations published at one key commute. Those are author obligations
-(§5.1.1 effect tracking — "Effect tracking" is the only context-transformation
+(§5.1.1 effect tracking: "Effect tracking" is the only context-transformation
 primitive, and the runtime does not check the inverse witness; §6.1 "System
 Boundary"). This review discharges them in code.
 
@@ -102,7 +102,7 @@ Boundary"). This review discharges them in code.
 
 One line per finding in the report, then the patch.
 
-### Temporal — revertible effects
+### Temporal: revertible effects
 
 - `leak:` side effect not installed through the context (`setInterval`,
   `addEventListener`, `on()`, `fetch` abort, file watch, process, mutex,
@@ -118,7 +118,7 @@ One line per finding in the report, then the patch.
 - `foreign-ctx:` effect installed on a context that is not `fiber.ctx`
   (captured parent, global, another plugin's `ctx`). Install on the owner.
 
-### Spatial — reactive coeffects
+### Spatial: reactive coeffects
 
 - `inject:` required service used as `ctx.foo` without `inject: ['foo']`.
   Declare it. Optional services use `ctx.get('foo')`, never the proxy.
@@ -195,7 +195,7 @@ registry has an HMR-safety test.
 ## Report (after the patches)
 
 ```
-CORDIS review — arXiv:2608.25512
+CORDIS review: arXiv:2608.25512
 scope: <root>
 fixed:
 - <file>:<line>: <tag> <what>. <what you did>.
@@ -204,4 +204,4 @@ skipped:
 ```
 
 No essay. Empty `fixed` with empty `skipped` means you looked and the
-workspace already holds the invariants — say that in one line.
+workspace already holds the invariants; say that in one line.
