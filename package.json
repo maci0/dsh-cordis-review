@@ -41,7 +41,8 @@
     "build": "bunx --bun tsc -p tsconfig.build.json",
     "test": "bun test",
     "typecheck": "bunx --bun tsc -p tsconfig.json",
-    "check": "bun lib/cli.js"
+    "check": "bun lib/cli.js",
+    "test:node": "node --test tests/*.test.*"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
