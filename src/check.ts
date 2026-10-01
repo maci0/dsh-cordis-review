@@ -709,7 +709,7 @@ function sgMembersAndToplevel(
         message: 'effect at module load. Move it into apply(ctx) / the Service constructor.',
       })
     }
-    for (const ch of codeBraces(srcLines[index] ?? '')) {
+    for (const ch of codeBraces(srcLines[index] ?? '', nonTs)) {
       if (ch === '{' || ch === '(') depth += 1
       if (ch === '}' || ch === ')') depth -= 1
     }
@@ -721,10 +721,13 @@ function sgMembersAndToplevel(
 /**
  * Yield the brace characters that are code, not string/comment text, so an
  * unbalanced `}` inside a literal cannot corrupt the toplevel depth pass.
- * Handles `'`, `"`, backtick strings (with `\` escapes) and `//` / `#` line
- * comments; block comments stay counted (a backstop, not a lexer).
+ * Handles `'`, `"`, backtick strings (with `\` escapes) and line comments:
+ * `#` in Python, `//` in JS/TS (where `#` starts a private member). Block
+ * comments stay counted (a backstop, not a lexer).
+ * @param line - one source line.
+ * @param python - whether `#` starts a comment.
  */
-function* codeBraces(line: string): Generator<string> {
+function* codeBraces(line: string, python: boolean): Generator<string> {
   let quote: string | undefined
   for (let i = 0; i < line.length; i += 1) {
     const ch = line[i]
@@ -737,8 +740,7 @@ function* codeBraces(line: string): Generator<string> {
       quote = ch
       continue
     }
-    if (ch === '/' && line[i + 1] === '/') return
-    if (ch === '#') return
+    if (python ? ch === '#' : ch === '/' && line[i + 1] === '/') return
     if (ch === '{' || ch === '(' || ch === '}' || ch === ')') yield ch
   }
 }
