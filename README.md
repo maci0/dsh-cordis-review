@@ -115,12 +115,10 @@ npm run check       # scan this checkout (runs the built lib/cli.js)
 
 Coverage: every checker tag against real fixtures, CLI flag parsing, help, and each non-zero exit, frontmatter block scalars and chomping, skill discovery tolerating a broken sibling, abort settling promptly, and a real Cordis composition that mounts the skill provider and disposes it.
 
-`npm run check` on this checkout exits 1 on purpose: `cordis.patch.yml` and `cordis.local.yml` both carry an `id: cordis-review` row, so the checker reports the duplicate Loader id. That is the finding it is supposed to report.
-
-For a one-shot boot without installing:
+For local development, install the checkout as a bundle:
 
 ```sh
-pnpm dsh web --patch /path/to/dsh-cordis-review/cordis.local.yml
+dsh plugin --profile <name> add <path-to-checkout>
 ```
 
 ## Licence

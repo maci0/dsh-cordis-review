@@ -375,15 +375,9 @@ test('shells out once per language, not once per chunk per language', async () =
   })
 })
 
-test('this plugin is clean apart from its two alternative install rows', async () => {
+test('this plugin is clean', async () => {
   const { dirname } = await import('node:path')
   const { fileURLToPath } = await import('node:url')
   const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-  const hits = await check(root)
-  // cordis.patch.yml vs cordis.local.yml carry the same id by design
-  // (alternative installs, never applied together); everything else is clean.
-  assert.deepEqual(
-    hits.filter((h) => !(h.tag === 'id' && h.message.includes('cordis-review'))),
-    [],
-  )
+  assert.deepEqual(await check(root), [])
 })
