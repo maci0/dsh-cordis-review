@@ -311,12 +311,27 @@ function fallback(rel: string): Finding {
   }
 }
 
+/** A directory the walk could not list; nothing under it was scanned. */
+export interface Unreadable {
+  /** Path relative to the scan root (`.` for the root itself). */
+  readonly dir: string
+  /** The listing error's message. */
+  readonly reason: string
+}
+
+/** One scan: its findings, and the directories it could not read. */
+export interface CheckResult {
+  readonly findings: readonly Finding[]
+  /** Non-empty means the scan is incomplete. */
+  readonly unreadable: readonly Unreadable[]
+}
+
 /**
  * Scan `root` for the closed-form tags.
  * @param root - workspace (or subdirectory) to walk.
  */
-export async function check(root: string): Promise<readonly Finding[]> {
-  const files = await listFiles(root)
+export async function check(root: string): Promise<CheckResult> {
+  const { files, unreadable } = await listFiles(root)
   const detected = astGrepOnPath()
   if (!detected) {
     warn('ast-grep not on PATH: every covered file takes the warning + LLM-fallback path. Install ast-grep for deterministic results.')
@@ -368,11 +383,13 @@ export async function check(root: string): Promise<readonly Finding[]> {
     findings.push(...sgMembersAndToplevel(rel, byRule, text, true, 'm-py', 't-py', 't-bare-py'))
   }
 
-  return findings.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.tag.localeCompare(b.tag))
+  findings.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.tag.localeCompare(b.tag))
+  return { findings, unreadable }
 }
 
-async function listFiles(root: string): Promise<string[]> {
+async function listFiles(root: string): Promise<{ files: string[]; unreadable: Unreadable[] }> {
   const out: string[] = []
+  const unreadable: Unreadable[] = []
   // Walk by hand instead of `readdir({ recursive: true })`: pruning skipped
   // dirs during descent keeps node_modules unvisited, and skipping entries
   // that are neither plain files nor plain dirs means a symlinked dir (pnpm's
@@ -381,7 +398,9 @@ async function listFiles(root: string): Promise<string[]> {
     let entries
     try {
       entries = await readdir(dir, { withFileTypes: true })
-    } catch {
+    } catch (error) {
+      const rel = relative(root, dir).split('\\').join('/')
+      unreadable.push({ dir: rel === '' ? '.' : rel, reason: error instanceof Error ? error.message : String(error) })
       return
     }
     for (const entry of entries) {
@@ -394,7 +413,8 @@ async function listFiles(root: string): Promise<string[]> {
     }
   }
   await walk(root)
-  return out
+  unreadable.sort((a, b) => a.dir.localeCompare(b.dir))
+  return { files: out, unreadable }
 }
 
 function astGrepOnPath(): boolean {
