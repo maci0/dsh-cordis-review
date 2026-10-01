@@ -68,7 +68,7 @@ Checker flags:
 
 The ast-grep engine is auto-detected. With the binary on PATH, covered files get the closed-form pass; without it, every covered file warns on stderr and takes the LLM-fallback path.
 
-Exit status: **0** clean, **1** findings, **2** usage or path error. An unknown flag, a missing flag value, or a root that is not an existing directory exits 2 with a one-line `cordis-check:` message on stderr.
+Exit status: **0** clean, **1** findings, **2** usage, path, or ast-grep error. An unknown flag, a root that is not an existing directory, or an `ast-grep scan` that fails (non-zero exit, no JSON array) exits 2 with a one-line `cordis-check:` message on stderr.
 
 ## How a run goes
 
