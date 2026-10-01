@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { spawnSync } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { scratch } from './scratch.ts'
 import { join } from 'node:path'
 import { dirname } from 'node:path'
@@ -109,6 +109,26 @@ test('the checker step in the cordis-review skill runs on a shipped file with re
       assert.doesNotMatch(probe.stderr, /unknown flag/, `${flag} is documented but the CLI rejects it`)
     }
   } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('cli reports an unreadable directory on stderr and exits 2 instead of claiming clean', async (t) => {
+  if (process.getuid?.() === 0) {
+    t.skip('root reads a mode-000 directory anyway')
+    return
+  }
+  const dir = await mkdtemp(join(scratch, 'dsh-cordis-review-cli-'))
+  try {
+    await writeFile(join(dir, 'index.ts'), 'export const x = 1\n')
+    await mkdir(join(dir, 'locked'))
+    await chmod(join(dir, 'locked'), 0o000)
+    const result = run(dir)
+    assert.equal(result.status, 2)
+    assert.equal(result.stdout, '')
+    assert.match(result.stderr, /^cordis-check: cannot read locked: EACCES[^\n]*\ncordis-check: incomplete scan: 1 directory unreadable\n$/)
+  } finally {
+    await chmod(join(dir, 'locked'), 0o755)
     await rm(dir, { recursive: true, force: true })
   }
 })

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { scratch } from './scratch.ts'
 import { join } from 'node:path'
 import { check } from '../src/check.ts'
@@ -25,7 +25,7 @@ test('mix-export: default plus named apply', async () => {
       'src/index.ts': "export default class S {}\nexport function apply() {}\n",
     },
     async (root) => {
-      const hits = await check(root)
+      const hits = (await check(root)).findings
       assert.equal(hits.some((h) => h.tag === 'mix-export'), true)
     },
   )
@@ -41,7 +41,7 @@ test('mix-export: a named apply with a return type still mixes', async () => {
         'export default class S {}\nexport function apply(ctx: HostContext, config: Config): void {}\n',
     },
     async (root) => {
-      const hits = await check(root)
+      const hits = (await check(root)).findings
       assert.equal(hits.some((h) => h.tag === 'mix-export'), true)
     },
   )
@@ -54,7 +54,7 @@ test('mix-export: a generic named apply still mixes', async () => {
       'src/generic-typed.ts': 'export default class S {}\nexport function apply<T>(ctx: T): void {}\n',
     },
     async (root) => {
-      const hits = await check(root)
+      const hits = (await check(root)).findings
       const mixed = hits.filter((h) => h.tag === 'mix-export').map((h) => h.file).sort()
       assert.deepEqual(mixed, ['src/generic-typed.ts', 'src/generic.ts'])
     },
@@ -70,7 +70,7 @@ test('inject: a typed or `as const` inject declaration is still a declaration', 
         "export const inject = ['skills'] as const\nexport function apply(ctx) {\n  ctx.skills.register(() => {})\n}\n",
     },
     async (root) => {
-      const hits = await check(root)
+      const hits = (await check(root)).findings
       assert.deepEqual(hits, [])
     },
   )
@@ -82,7 +82,7 @@ test('inject: ctx.foo without inject declaration', async () => {
       'src/index.ts': "export function apply(ctx) {\n  ctx.tools.register(() => {})\n}\n",
     },
     async (root) => {
-      const hits = await check(root)
+      const hits = (await check(root)).findings
       const hit = hits.find((h) => h.tag === 'inject')
       assert.ok(hit)
       assert.match(hit.message, /tools/)
@@ -97,7 +97,7 @@ test('inject: declared inject and ctx.get are clean', async () => {
         "export const inject = ['tools']\nexport function apply(ctx) {\n  ctx.tools.register(() => {})\n  ctx.get('sessions')\n  ctx.effect(() => () => {})\n}\n",
     },
     async (root) => {
-      const hits = await check(root)
+      const hits = (await check(root)).findings
       assert.deepEqual(hits, [])
     },
   )
@@ -110,7 +110,7 @@ test('inject: slots.inject is not Cordis inject', async () => {
         "export const inject = ['slots']\nexport function apply(ctx) {\n  ctx.slots.inject('x', () => {})\n  ctx.slots.register(() => {})\n}\n",
     },
     async (root) => {
-      const hits = await check(root)
+      const hits = (await check(root)).findings
       assert.deepEqual(hits, [])
     },
   )
@@ -123,7 +123,7 @@ test('inject: ctx.inject widens keys for the callback', async () => {
         "export function apply(ctx) {\n  ctx.inject(['skills'], (scope) => {\n    scope.skills.registerProvider(() => ({}))\n  })\n}\n",
     },
     async (root) => {
-      const hits = await check(root)
+      const hits = (await check(root)).findings
       assert.equal(hits.some((h) => h.tag === 'inject'), false)
     },
   )
@@ -135,7 +135,7 @@ test('toplevel: ctx.effect at module load', async () => {
       'src/index.ts': "ctx.effect(() => () => {})\n",
     },
     async (root) => {
-      const hits = await check(root)
+      const hits = (await check(root)).findings
       assert.equal(hits.some((h) => h.tag === 'toplevel'), true)
     },
   )
@@ -148,7 +148,7 @@ test('toplevel: a bare register(…) at module load is caught, not inside apply'
       'src/scoped.ts': 'export function apply(ctx) {\n  register("thing", handler)\n}\n',
     },
     async (root) => {
-      const hits = await check(root)
+      const hits = (await check(root)).findings
       const bare = hits.filter((h) => h.tag === 'toplevel')
       assert.equal(bare.length, 1)
       assert.equal(bare[0]?.file, 'src/bare.ts')
@@ -162,7 +162,7 @@ test('toplevel: a Python effect inside a function is not module load', async () 
       'src/eff.py': 'def apply(ctx):\n    ctx.effect(() => None)\n',
     },
     async (root) => {
-      const hits = await check(root)
+      const hits = (await check(root)).findings
       assert.equal(hits.some((h) => h.tag === 'toplevel'), false)
     },
   )
@@ -175,7 +175,7 @@ test('toplevel: a bare register(…) at module load is caught in Python too', as
       'src/scoped.py': 'def apply(ctx):\n    register("thing", handler)\n',
     },
     async (root) => {
-      const hits = await check(root)
+      const hits = (await check(root)).findings
       const bare = hits.filter((h) => h.tag === 'toplevel')
       assert.equal(bare.length, 1)
       assert.equal(bare[0]?.file, 'src/bare.py')
@@ -190,7 +190,7 @@ test('inject: ctx.inject widens a callback written on the same line', async () =
         "export function apply(ctx) {\n  ctx.inject(['skills'], (scope) => scope.skills.registerProvider(() => ({})))\n}\n",
     },
     async (root) => {
-      const hits = await check(root)
+      const hits = (await check(root)).findings
       assert.equal(hits.some((h) => h.tag === 'inject'), false)
     },
   )
@@ -203,7 +203,7 @@ test('id: duplicate Loader ids across yaml files', async () => {
       'b/cordis.local.yml': '- insert:\n    - id: foo\n      name: b\n',
     },
     async (root) => {
-      const hits = await check(root)
+      const hits = (await check(root)).findings
       const hit = hits.find((h) => h.tag === 'id' && h.message.includes('foo'))
       assert.ok(hit)
       assert.match(hit.message, /first at/)
@@ -218,7 +218,7 @@ test('skips browser __ModuleLoader__ factories', async () => {
         "window.__ModuleLoader__.load({ factory() { function apply(ctx) { ctx.slots.register() } } })\n",
     },
     async (root) => {
-      const hits = await check(root)
+      const hits = (await check(root)).findings
       assert.deepEqual(hits, [])
     },
   )
@@ -230,7 +230,7 @@ test('skips node_modules', async () => {
       'node_modules/x/index.ts': "export default class S {}\nexport function apply() {}\n",
     },
     async (root) => {
-      const hits = await check(root)
+      const hits = (await check(root)).findings
       assert.deepEqual(hits, [])
     },
   )
@@ -242,7 +242,7 @@ test('python inject when ast-grep is available', async () => {
       'src/plugin.py': "def apply(ctx):\n    ctx.jobs.run()\n",
     },
     async (root) => {
-      const hits = await check(root)
+      const hits = (await check(root)).findings
       assert.equal(hits.some((h) => h.tag === 'inject' && h.message.includes('jobs')), true)
     },
   )
@@ -255,7 +255,7 @@ test('python inject, comment ignored, declared keys clean', async () => {
         "inject = ['tools']\nctx.effect()\ndef apply(ctx):\n    ctx.tools.register()\n    # ctx.secrets.register()\n    ctx.jobs.run()\n",
     },
     async (root) => {
-      const hits = await check(root)
+      const hits = (await check(root)).findings
       assert.equal(hits.some((h) => h.tag === 'toplevel'), true)
       assert.equal(hits.some((h) => h.tag === 'inject' && h.message.includes('jobs')), true)
       assert.equal(hits.some((h) => h.message.includes('secrets')), false)
@@ -279,7 +279,7 @@ test('engine missing: covered file warns and takes the LLM fallback', async () =
       const path = process.env['PATH'] ?? ''
       process.env['PATH'] = '/nonexistent'
       try {
-        const hits = await check(root)
+        const hits = (await check(root)).findings
         assert.equal(hits.length, 1)
         assert.equal(hits[0]?.tag, 'inject')
         assert.equal(
@@ -302,7 +302,7 @@ test('non-TS: bare calls and underscore members are locals', async () => {
       'src/a.py': 'def apply(ctx):\n    ctx.snapshot()\n    ctx._undos.append(1)\n    ctx.do_thing()\n    ctx.jobs.run()\n',
     },
     async (root) => {
-      const hits = await check(root)
+      const hits = (await check(root)).findings
       assert.equal(hits.filter((h) => h.tag === 'inject').length, 1)
       assert.ok(hits.every((h) => h.message.includes('jobs')))
     },
@@ -318,7 +318,7 @@ test('skips generated and vendored dirs', async () => {
     'target/viol.py': 'ctx.effect()\n',
   }
   await withTree(files, async (root) => {
-    const hits = await check(root)
+    const hits = (await check(root)).findings
     assert.deepEqual(hits, [])
   })
 })
@@ -331,7 +331,7 @@ test('toplevel: braces in strings and comments do not corrupt depth', async () =
       'src/b.ts': 'export function apply(ctx) {\n  ctx.tools.register(() => {})\n}\n// }\nctx.effect(() => () => {})\n',
     },
     async (root) => {
-      const hits = await check(root)
+      const hits = (await check(root)).findings
       const tops = hits.filter((h) => h.tag === 'toplevel').map((h) => `${h.file}:${h.line}`)
       assert.deepEqual(tops, ['src/a.py:2', 'src/b.ts:5', 'src/c.py:2'])
     },
@@ -345,7 +345,7 @@ test('toplevel: a JS private member is code, not a comment', async () => {
       'src/b.js': "class Cache { #items = new Map() }\nctx.on('ready', () => {})\n",
     },
     async (root) => {
-      const hits = await check(root)
+      const hits = (await check(root)).findings
       const tops = hits.filter((h) => h.tag === 'toplevel').map((h) => `${h.file}:${h.line}`)
       assert.deepEqual(tops, ['src/a.ts:2', 'src/b.js:2'])
     },
@@ -382,7 +382,7 @@ test('shells out once per language, not once per chunk per language', async () =
       const path = process.env['PATH'] ?? ''
       process.env['PATH'] = `${bin}:${path}`
       try {
-        await check(root)
+        (await check(root)).findings
       } finally {
         process.env['PATH'] = path
       }
@@ -398,7 +398,7 @@ test('this plugin is clean', async () => {
   const { dirname } = await import('node:path')
   const { fileURLToPath } = await import('node:url')
   const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-  assert.deepEqual(await check(root), [])
+  assert.deepEqual(await check(root), { findings: [], unreadable: [] })
 })
 
 test('a .scratch directory is never scanned', async () => {
@@ -408,7 +408,31 @@ test('a .scratch directory is never scanned', async () => {
       'src/index.ts': 'export const x = 1\n',
     },
     async (root) => {
-      assert.deepEqual(await check(root), [])
+      assert.deepEqual((await check(root)).findings, [])
+    },
+  )
+})
+
+test('an unreadable directory is reported, not skipped', async (t) => {
+  if (process.getuid?.() === 0) {
+    t.skip('root reads a mode-000 directory anyway')
+    return
+  }
+  await withTree(
+    {
+      'src/index.ts': 'export const x = 1\n',
+      'locked/inner/a.ts': 'ctx.effect(() => () => {})\n',
+    },
+    async (root) => {
+      await chmod(join(root, 'locked'), 0o000)
+      try {
+        const result = await check(root)
+        assert.deepEqual(result.findings, [])
+        assert.deepEqual(result.unreadable.map((entry) => entry.dir), ['locked'])
+        assert.match(result.unreadable[0]?.reason ?? '', /EACCES/)
+      } finally {
+        await chmod(join(root, 'locked'), 0o755)
+      }
     },
   )
 })

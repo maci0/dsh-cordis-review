@@ -66,7 +66,9 @@ names (`ctx.effect`, `inject`, `ctx.get`, `apply`).
    LLM-fallback hit: judge that file against the checklist yourself (that is
    the fallback, not a second scanner). `--help` prints the usage. `leak` /
    `inverse` / `hmr` / `boundary` stay judgment.
-   `cordis-check: clean` still means walk the checklist.
+   `cordis-check: clean` still means walk the checklist. Exit 2 with
+   `cordis-check: cannot read <dir>` lines means those directories were not
+   scanned: judge their files yourself or fix the permissions and re-run.
 5. **Audit, then fix.** Walk the checklist below. Each hit is a code change
    unless it is a documented outside-boundary emission. Grep callers of every
    function you touch; fix the shared primitive, not one call site.

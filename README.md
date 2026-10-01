@@ -65,7 +65,7 @@ Checker flags:
 
 The ast-grep engine is auto-detected. With the binary on PATH, covered files get the closed-form pass; without it, every covered file warns on stderr and takes the LLM-fallback path.
 
-Exit status: **0** clean, **1** findings, **2** usage, path, or ast-grep error. An unknown flag, a root that is not an existing directory, or an `ast-grep scan` that fails (non-zero exit, no JSON array) exits 2 with a one-line `cordis-check:` message on stderr.
+Exit status: **0** clean, **1** findings, **2** usage, path, or ast-grep error, or an incomplete scan. An unknown flag, a root that is not an existing directory, or an `ast-grep scan` that fails (non-zero exit, no JSON array) exits 2 with a one-line `cordis-check:` message on stderr. A directory the walk cannot list (permissions, a race with a delete) is never skipped silently: each one gets a `cordis-check: cannot read <dir>: <reason>` line on stderr, findings from the readable part still print, and the run exits 2 instead of claiming `clean`, since nothing under that directory was checked.
 
 ## Configure
 

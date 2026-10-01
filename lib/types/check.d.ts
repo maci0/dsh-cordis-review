@@ -19,8 +19,21 @@ export interface Finding {
     /** What to change. */
     readonly message: string;
 }
+/** A directory the walk could not list; nothing under it was scanned. */
+export interface Unreadable {
+    /** Path relative to the scan root (`.` for the root itself). */
+    readonly dir: string;
+    /** The listing error's message. */
+    readonly reason: string;
+}
+/** One scan: its findings, and the directories it could not read. */
+export interface CheckResult {
+    readonly findings: readonly Finding[];
+    /** Non-empty means the scan is incomplete. */
+    readonly unreadable: readonly Unreadable[];
+}
 /**
  * Scan `root` for the closed-form tags.
  * @param root - workspace (or subdirectory) to walk.
  */
-export declare function check(root: string): Promise<readonly Finding[]>;
+export declare function check(root: string): Promise<CheckResult>;
