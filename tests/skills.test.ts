@@ -225,6 +225,22 @@ test('a skill directory without SKILL.md is reported and skipped', async () => {
   }
 })
 
+test('a lookup aborted mid-read settles without a warning', async () => {
+  const warnings: string[] = []
+  const provider = createSkillProvider({ skillsDir, onWarn: (message) => warnings.push(message) })
+  const controller = new AbortController()
+  const listing = provider.list({ signal: controller.signal })
+  controller.abort()
+  await listing
+  const candidate = (await provider.list())[0]
+  assert.ok(candidate)
+  const second = new AbortController()
+  const loading = provider.get(candidate, { signal: second.signal })
+  second.abort()
+  assert.equal(await loading, undefined)
+  assert.deepEqual(warnings, [])
+})
+
 test('a skill that omits name loads under its directory name', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-cordis-review-'))
   try {
