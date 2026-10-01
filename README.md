@@ -11,10 +11,10 @@ Paper: [A Programming Paradigm for Spatiotemporal Composability](https://arxiv.o
 
 ## What you get
 
-- **One command, one product.** `/cordis-review` loads the bundled skill body through the skill registry and lands in the `/` menu as DSH's command surface for user-invocable skills. Workspace defaults to the current one; `/cordis-review <path>` scopes it.
+- **Two commands, one product.** `/cordis-review` and `/cordis-doc-review` load their bundled skill bodies through the skill registry and land in the `/` menu, DSH's command surface for user-invocable skills. Workspace defaults to the current one; `/cordis-review <path>` scopes it.
 - **Rubrics that ship with the plugin.** `skills/cordis-review/SKILL.md` audits temporal and spatial composability. `skills/cordis-doc-review/SKILL.md` creates accurate tutorials, references, cookbooks, subsystem docs, and package contracts from source, tests, and configuration.
 - **Patches, not advice.** The skill instructs the agent to fix every applicable hit, grep the callers of anything it touches, fix the shared primitive, and leave one dispose test per registration it adds or repairs. Hits outside the system boundary are skipped with a one-line reason.
-- **A closed-form checker.** `cordis-review-check` prints the four tags that are grammar rather than judgment — `mix-export`, `inject`, `toplevel`, `id`. Every tag is an ast-grep query over JS/TS/TSX, JavaScript/JSX, Python, and YAML.
+- **A closed-form checker.** `cordis-review-check` prints the four tags that are grammar rather than judgment: `mix-export`, `inject`, `toplevel`, `id`. Every tag is an ast-grep query over JS/TS/TSX, JavaScript/JSX, Python, and YAML.
 - **A real fallback path.** No `ast-grep` on PATH means each covered file warns on stderr and yields an LLM-fallback hit for the review agent to judge. `leak`, `inverse`, `hmr`, and `boundary` stay with the agent by design.
 - **Honest frontmatter handling.** Skill frontmatter is parsed with `yaml`, so block scalars and nested maps behave as the registry expects. The documented invocation keys (`user-invocable`, `disable-model-invocation`) and `whenToUse` project into the registry's summary; unknown keys stay in `metadata`.
 
@@ -24,18 +24,15 @@ On DeepSeek Harness and `dsh-*` plugins the paper maps onto existing names: `ctx
 
 > **Install it as a bundle.** `dsh plugin add …` mounts the row from the
 > package's own patch layer, which is what the settings editor can write to. A
-> row added with `--patch` is an overlay: it disappears at the next start, and
-> the Plugins card cannot save into it — the editor refuses a write an overlay
-> would win.
+> row added with `--patch` is an overlay: it disappears at the next start.
 
 ```sh
-dsh plugin --profile web add github:maci0/dsh-cordis-review
-dsh plugin --profile web update dsh-cordis-review   # refresh later
+dsh plugin --profile web add github:maci0/dsh-cordis-review#v0.14.0
 ```
 
-Then **restart `dsh web`**: bundle layers compose at boot, and `dsh.profile.bundles` is frozen there.
+Pin a release tag: a bare `github:` spec floats on `main`. To upgrade, run the same command with the newer tag, then restart `dsh web` (bundle layers compose at boot).
 
-The package declares `dsh.bundle` and ships a built `lib/`, so `dsh plugin add` activates its layer. Do not also paste the `id: cordis-review` row into your profile's `cordis.patch.yml` — `insert` does not dedupe ids, so the plugin would mount twice. Override the row's `config` from your profile instead.
+The package declares `dsh.bundle` and ships a built `lib/`, so `dsh plugin add` activates its layer. Do not also paste the `id: cordis-review` row into your profile's `cordis.patch.yml`: `insert` does not dedupe ids, so the plugin would mount twice.
 
 Uninstall with the **package name**:
 
@@ -43,7 +40,7 @@ Uninstall with the **package name**:
 dsh plugin --profile web remove dsh-cordis-review
 ```
 
-`remove github:…` is `pnpm remove github:…`, and pnpm resolves the argument as a dependency key — it is not there, so the command fails with `ERR_PNPM_CANNOT_REMOVE_MISSING_DEPS` even though the plugin is installed.
+`remove github:…` is `pnpm remove github:…`, and pnpm resolves the argument as a dependency key. It is not there, so the command fails with `ERR_PNPM_CANNOT_REMOVE_MISSING_DEPS` even though the plugin is installed.
 
 Skill-only install, without the plugin row (DSH already watches `~/.dsh/skills`):
 
@@ -52,7 +49,7 @@ mkdir -p ~/.dsh/skills
 ln -s /path/to/dsh-cordis-review/skills/cordis-review ~/.dsh/skills/cordis-review
 ```
 
-Edits then load on the next `/cordis-review`. A user- or project-level skill of the same name outranks the bundled copy.
+Edits then load on the next `/cordis-review`. A user- or project-level skill of the same name outranks the bundled copy. The symlinked skill's directory has no `lib/` beside it, so run its closed-form step as `node /path/to/dsh-cordis-review/lib/cli.js [scope]`.
 
 ## Commands
 
@@ -64,22 +61,11 @@ Edits then load on the next `/cordis-review`. A user- or project-level skill of 
 
 Checker flags:
 
-- `-h`, `--help` — prints the usage.
+- `-h`, `--help`: prints the usage.
 
 The ast-grep engine is auto-detected. With the binary on PATH, covered files get the closed-form pass; without it, every covered file warns on stderr and takes the LLM-fallback path.
 
 Exit status: **0** clean, **1** findings, **2** usage, path, or ast-grep error. An unknown flag, a root that is not an existing directory, or an `ast-grep scan` that fails (non-zero exit, no JSON array) exits 2 with a one-line `cordis-check:` message on stderr.
-
-## How a run goes
-
-1. **Scope** — the current workspace, or the path argument.
-2. **Get the rules** — the skill's own checklist, plus the repo's `AGENTS.md` / `docs/cordis-primer.md` in DSH workspaces.
-3. **Map the runtime** — context object, effect primitives, entrypoints, loader.
-4. **Closed-form pass** — run the checker first.
-5. **Audit, then fix** — each hit becomes a code change unless it is a documented outside-boundary emission.
-6. **Verify** — dispose the contributing fiber and assert the contribution is gone; re-run the checker.
-
-A clean checker is not a pass. The runtime does not prove that an inverse actually reverts, or that operations published at one key commute — those are author obligations, and this review discharges them in code.
 
 ## Configure
 
@@ -88,12 +74,23 @@ None. The Loader row carries no `config`. The only knobs are the skill frontmatt
 | Key | Default | Meaning |
 |---|---|---|
 | `name` | directory name | Kebab-case skill name; must be valid or the file is skipped. |
-| `description` | — | Required. Empty description means the skill is skipped with a warning. |
+| `description` | none | Required. Empty description means the skill is skipped with a warning. |
 | `whenToUse` | unset | Extra routing hint, projected into the registry summary. |
 | `disable-model-invocation` | `false` | `true` keeps the model from invoking the skill on its own. |
 | `user-invocable` | `true` | `false` removes `/cordis-review` from the command surface. |
 
 Both invocation keys take the spellings the harness accepts: a YAML boolean, `1`/`0`, or `yes`/`no`/`on`/`off`/`true`/`false` in any case. Any other value, or a legacy camelCase key (`userInvocable`, `modelInvocable`, `disableModelInvocation`), skips the skill with a warning. Provider-specific keys survive in `metadata`. One broken skill file is skipped with a warning; it never costs the catalog its other skills.
+
+## How it works
+
+1. **Scope:** the current workspace, or the path argument.
+2. **Get the rules:** the skill's own checklist, plus the repo's `AGENTS.md` / `docs/cordis-primer.md` in DSH workspaces.
+3. **Map the runtime:** context object, effect primitives, entrypoints, loader.
+4. **Closed-form pass:** run the checker first.
+5. **Audit, then fix:** each hit becomes a code change unless it is a documented outside-boundary emission.
+6. **Verify:** dispose the contributing fiber and assert the contribution is gone; re-run the checker.
+
+A clean checker is not a pass. The runtime does not prove that an inverse actually reverts, or that operations published at one key commute. Those are author obligations, and this review discharges them in code.
 
 ## Limits
 
