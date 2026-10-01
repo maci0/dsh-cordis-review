@@ -27,7 +27,7 @@ On DeepSeek Harness and `dsh-*` plugins the paper maps onto existing names: `ctx
 > row added with `--patch` is an overlay: it disappears at the next start.
 
 ```sh
-dsh plugin --profile web add github:maci0/dsh-cordis-review#v0.15.0
+dsh plugin --profile web add github:maci0/dsh-cordis-review#v0.16.0
 ```
 
 Pin a release tag: a bare `github:` spec floats on `main`. To upgrade, run the same command with the newer tag, then restart `dsh web` (bundle layers compose at boot).
