@@ -54,20 +54,17 @@ names (`ctx.effect`, `inject`, `ctx.get`, `apply`).
    the checklist. From this package root:
 
    ```
-   node --experimental-strip-types --disable-warning=ExperimentalWarning src/cli.ts [scope]
+   node lib/cli.js [scope]
    ```
 
    The package root is the parent of `skills/cordis-review/` (this skill's
    directory). It prints `file:line: tag: message` for `mix-export`, `inject`,
-   `toplevel`, and `id` — every tag is one ast-grep query. Without `ast-grep`
-   on PATH each covered file warns on stderr and yields an LLM-fallback hit:
-   judge that file against the checklist yourself (that is the fallback, not a
-   second scanner). The binary ships no Zig grammar, so `.zig` takes that
-   path unless the CLI is given a grammar registry
-   (`--grammar-config <sgconfig.yml>` — an `sgconfig.yml` with a `zig`
-   language). `--ast-grep` forces the engine on, `--no-ast-grep` forces the
-   fallback path, and `--help` lists both. `leak` / `inverse` / `hmr` /
-   `boundary` stay judgment.
+   `toplevel`, and `id` (every tag is one ast-grep query) over JS/TS/TSX,
+   Python, and YAML files; other languages are not scanned. Without
+   `ast-grep` on PATH each covered file warns on stderr and yields an
+   LLM-fallback hit: judge that file against the checklist yourself (that is
+   the fallback, not a second scanner). `--help` prints the usage. `leak` /
+   `inverse` / `hmr` / `boundary` stay judgment.
    `cordis-check: clean` still means walk the checklist.
 5. **Audit, then fix.** Walk the checklist below. Each hit is a code change
    unless it is a documented outside-boundary emission. Grep callers of every

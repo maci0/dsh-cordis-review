@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { spawnSync } from 'node:child_process'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { dirname } from 'node:path'
@@ -82,6 +82,32 @@ test('cli scans a root with one covered file and prints findings', async () => {
     const hit = run(dir)
     assert.equal(hit.status, 1)
     assert.match(hit.stdout, /inject:/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('the checker step in the cordis-review skill runs on a shipped file with real flags', async () => {
+  const packageRoot = join(dirname(cli), '..')
+  const skill = await readFile(join(packageRoot, 'skills', 'cordis-review', 'SKILL.md'), 'utf8')
+  const step = skill.slice(skill.indexOf('4. **Closed-form pass.**'), skill.indexOf('5. **Audit, then fix.**'))
+  const command = /```\n\s*(node [^\n]+)\n\s*```/.exec(step)?.[1]
+  assert.ok(command, 'step 4 shows the checker command')
+  const [, ...args] = command.split(/\s+/)
+  const script = args.find((arg) => !arg.startsWith('-'))
+  assert.ok(script)
+  // The installed package carries only `files`; `src/` is not among them.
+  const manifest = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8')) as { files: string[] }
+  assert.ok(manifest.files.includes('lib/**/*.js') && script.startsWith('lib/') && script.endsWith('.js'), `${script} ships`)
+
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-cordis-review-cli-'))
+  try {
+    const run = spawnSync(process.execPath, args.map((arg) => (arg === '[scope]' ? dir : arg)), { cwd: packageRoot, encoding: 'utf8' })
+    assert.equal(run.stdout, 'cordis-check: clean\n')
+    for (const flag of new Set(step.match(/(?<![\w-])--[a-z][a-z-]*/g) ?? [])) {
+      const probe = spawnSync(process.execPath, [join(packageRoot, script), flag, dir], { encoding: 'utf8' })
+      assert.doesNotMatch(probe.stderr, /unknown flag/, `${flag} is documented but the CLI rejects it`)
+    }
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
