@@ -43,9 +43,9 @@ interface SkillProviderOptions {
  * Read every valid skill directory under `skillsDir`.
  *
  * A missing directory, a directory without `SKILL.md`, a file whose frontmatter
- * the reader refuses, and a file with a missing description are reported
- * through `onWarn` and skipped: one broken file must not cost the catalog its
- * other skills.
+ * the reader refuses, and a file with a missing description or an invalid
+ * invocation key are reported through `onWarn` and skipped: one broken file
+ * must not cost the catalog its other skills.
  * @param skillsDir - directory holding one subdirectory per skill.
  * @param onWarn - optional non-fatal problem sink.
  * @param signal - aborts discovery for a caller that no longer wants the result.

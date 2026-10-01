@@ -93,7 +93,7 @@ None. The Loader row carries no `config`. The only knobs are the skill frontmatt
 | `disable-model-invocation` | `false` | `true` keeps the model from invoking the skill on its own. |
 | `user-invocable` | `true` | `false` removes `/cordis-review` from the command surface. |
 
-Provider-specific keys survive in `metadata`. One broken skill file is skipped with a warning; it never costs the catalog its other skills.
+Both invocation keys take the spellings the harness accepts: a YAML boolean, `1`/`0`, or `yes`/`no`/`on`/`off`/`true`/`false` in any case. Any other value, or a legacy camelCase key (`userInvocable`, `modelInvocable`, `disableModelInvocation`), skips the skill with a warning. Provider-specific keys survive in `metadata`. One broken skill file is skipped with a warning; it never costs the catalog its other skills.
 
 ## Limits
 
