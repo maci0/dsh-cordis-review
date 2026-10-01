@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { scratch } from './scratch.ts'
 import { join } from 'node:path'
 import { check } from '../src/check.ts'
 
 async function withTree(files: Record<string, string>, run: (root: string) => Promise<void>): Promise<void> {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-cordis-check-'))
+  const root = await mkdtemp(join(scratch, 'dsh-cordis-check-'))
   try {
     for (const [rel, body] of Object.entries(files)) {
       const abs = join(root, rel)
@@ -371,7 +371,7 @@ test('shells out once per language, not once per chunk per language', async () =
   for (let i = 0; i < 60; i += 1) files[`src/p${i}.py`] = 'inject = []\n'
 
   await withTree(files, async (root) => {
-    const bin = await mkdtemp(join(tmpdir(), 'dsh-cordis-shim-'))
+    const bin = await mkdtemp(join(scratch, 'dsh-cordis-shim-'))
     const log = join(bin, 'spawns.log')
     try {
       await writeFile(
@@ -399,4 +399,16 @@ test('this plugin is clean', async () => {
   const { fileURLToPath } = await import('node:url')
   const root = join(dirname(fileURLToPath(import.meta.url)), '..')
   assert.deepEqual(await check(root), [])
+})
+
+test('a .scratch directory is never scanned', async () => {
+  await withTree(
+    {
+      '.scratch/fixture/index.ts': 'ctx.effect(() => () => {})\n',
+      'src/index.ts': 'export const x = 1\n',
+    },
+    async (root) => {
+      assert.deepEqual(await check(root), [])
+    },
+  )
 })

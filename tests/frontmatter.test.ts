@@ -9,7 +9,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { scratch } from './scratch.ts'
 import { join } from 'node:path'
 import { parse as parseYaml } from 'yaml'
 import { parseFrontmatter, parseFrontmatterWithYaml } from '../src/frontmatter.ts'
@@ -166,7 +166,7 @@ test('a CRLF skill still loads instead of being skipped', async () => {
   // body arrives LF-normalized.
   assert.equal(withYaml.body, 'body\n')
 
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-cordis-frontmatter-'))
+  const dir = await mkdtemp(join(scratch, 'dsh-cordis-frontmatter-'))
   try {
     await mkdir(join(dir, 'crlf-skill'))
     await writeFile(join(dir, 'crlf-skill', 'SKILL.md'), source)

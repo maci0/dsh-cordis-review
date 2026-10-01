@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { spawnSync } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { scratch } from './scratch.ts'
 import { join } from 'node:path'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -28,7 +28,7 @@ test('cli rejects an unknown flag with one line and a non-zero exit', () => {
 })
 
 test('cli exits non-zero with one line for a root that does not exist', () => {
-  const missing = join(tmpdir(), 'dsh-cordis-review-missing-root')
+  const missing = join(scratch, 'dsh-cordis-review-missing-root')
   const result = run(missing)
   assert.notEqual(result.status, 0)
   assert.match(result.stderr, /no such path:/)
@@ -37,7 +37,7 @@ test('cli exits non-zero with one line for a root that does not exist', () => {
 })
 
 test('cli rejects a second positional as an extra argument', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-cordis-review-cli-'))
+  const dir = await mkdtemp(join(scratch, 'dsh-cordis-review-cli-'))
   try {
     const result = run(dir, dir)
     assert.notEqual(result.status, 0)
@@ -48,7 +48,7 @@ test('cli rejects a second positional as an extra argument', async () => {
 })
 
 test('cli reports a failing ast-grep scan with its own stderr, exit 2', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-cordis-review-cli-'))
+  const dir = await mkdtemp(join(scratch, 'dsh-cordis-review-cli-'))
   try {
     const bin = join(dir, 'bin')
     await mkdir(bin)
@@ -70,7 +70,7 @@ test('cli reports a failing ast-grep scan with its own stderr, exit 2', async ()
 })
 
 test('cli scans a root with one covered file and prints findings', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-cordis-review-cli-'))
+  const dir = await mkdtemp(join(scratch, 'dsh-cordis-review-cli-'))
   try {
     // No covered source file: a clean exit proves the root was parsed.
     await writeFile(join(dir, 'notes.txt'), 'plain text\n')
@@ -100,7 +100,7 @@ test('the checker step in the cordis-review skill runs on a shipped file with re
   const manifest = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8')) as { files: string[] }
   assert.ok(manifest.files.includes('lib/**/*.js') && script.startsWith('lib/') && script.endsWith('.js'), `${script} ships`)
 
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-cordis-review-cli-'))
+  const dir = await mkdtemp(join(scratch, 'dsh-cordis-review-cli-'))
   try {
     const run = spawnSync(process.execPath, args.map((arg) => (arg === '[scope]' ? dir : arg)), { cwd: packageRoot, encoding: 'utf8' })
     assert.equal(run.stdout, 'cordis-check: clean\n')

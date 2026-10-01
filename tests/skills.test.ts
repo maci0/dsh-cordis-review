@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { scratch } from './scratch.ts'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseFrontmatter } from '../src/frontmatter.ts'
@@ -141,7 +141,7 @@ test('cordis-review carries its own rubric and names the one fetchable URL', asy
 })
 
 test('frontmatter invocation controls project into the policy booleans', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-cordis-review-'))
+  const dir = await mkdtemp(join(scratch, 'dsh-cordis-review-'))
   try {
     await mkdir(join(dir, 'model-only'))
     await writeFile(
@@ -172,7 +172,7 @@ test('frontmatter invocation controls project into the policy booleans', async (
 })
 
 test('invocation keys accept the harness boolean spellings and skip anything else', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-cordis-review-'))
+  const dir = await mkdtemp(join(scratch, 'dsh-cordis-review-'))
   const skill = async (name: string, field: string): Promise<void> => {
     await mkdir(join(dir, name))
     await writeFile(join(dir, name, 'SKILL.md'), `---\nname: ${name}\ndescription: d\n${field}\n---\nbody\n`)
@@ -210,7 +210,7 @@ test('invocation keys accept the harness boolean spellings and skip anything els
 })
 
 test('a skill directory without SKILL.md is reported and skipped', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-cordis-review-'))
+  const dir = await mkdtemp(join(scratch, 'dsh-cordis-review-'))
   try {
     await mkdir(join(dir, 'empty'))
     await mkdir(join(dir, 'good'))
@@ -242,7 +242,7 @@ test('a lookup aborted mid-read settles without a warning', async () => {
 })
 
 test('a skill that omits name loads under its directory name', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'dsh-cordis-review-'))
+  const dir = await mkdtemp(join(scratch, 'dsh-cordis-review-'))
   try {
     await mkdir(join(dir, 'no-name'))
     await writeFile(join(dir, 'no-name', 'SKILL.md'), '---\ndescription: A usable description.\n---\nbody\n')

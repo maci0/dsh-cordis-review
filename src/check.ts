@@ -38,6 +38,7 @@ const SKIP_DIR = new Set([
   '.next',
   'vendor',
   'out',
+  '.scratch', // gitignored scratch space, including this package's own test fixtures
 ])
 
 /** Generated dirs with a variable prefix/suffix the exact set cannot name. */
