@@ -48,4 +48,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
+      - run: bun install -g --trust @ast-grep/cli@0.44.1
+      - run: ast-grep --version
       - run: bun run test:node
