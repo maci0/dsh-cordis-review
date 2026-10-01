@@ -111,9 +111,9 @@ function splitDocument(source: string): { block: string, body: string, present: 
  * Read one block scalar: same-indent lines only, chomping as YAML defines it.
  * @param lines - the block's lines.
  * @param header - index of the `key: >` line.
- * @param headerValue - the `>` / `|-` / `>2+` indicator.
+ * @param headerValue - the `>` or `|` indicator, optionally followed by `-`.
  * @returns the scalar and the index one past the block, or `undefined` when the
- *   block has an explicit or deeper indent, an interior blank line, or no content.
+ *   block has a deeper-indented line, an interior blank line, or no content.
  */
 function readBlockScalar(
   lines: readonly string[],
@@ -122,20 +122,12 @@ function readBlockScalar(
 ): { value: string; next: number } | undefined {
   const style = headerValue[0] as '|' | '>'
   const modifier = headerValue.slice(1)
-  let indent = 0
-  for (const char of modifier) {
-    if (char !== '+' && char !== '-') indent = char.charCodeAt(0) - 48
-  }
-  if (indent === 0) {
-    const first = lines[header + 1]
-    if (first === undefined || leadingSpaces(first) === 0) return undefined
-    indent = leadingSpaces(first)
-  }
+  const first = lines[header + 1]
+  if (first === undefined) return undefined
+  // Indentation is spaces only: a tab is a YAML parse error there, so a
+  // tab-led or unindented first line leaves the block to `yaml`.
+  const indent = leadingSpaces(first)
   if (indent === 0) return undefined
-  const firstContent = lines[header + 1]
-  // A tab is never block-scalar indentation to YAML; it is a parse error there
-  // and would only look like indentation here.
-  if (firstContent === undefined || firstContent.charCodeAt(0) === 9) return undefined
 
   const content: string[] = []
   let index = header + 1
