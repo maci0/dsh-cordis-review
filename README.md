@@ -101,13 +101,14 @@ A clean checker is not a pass. The runtime does not prove that an inverse actual
 
 ## Development
 
-TypeScript built to `lib/`; the tests run from source through Node's type stripping, so no build is needed to test.
+TypeScript built to `lib/`; bun runs the tests from source, so no build is needed to test. dsh loads plugins on Node `^22.19.0 || >=24.0.0`; development and tests run on bun.
 
 ```sh
-npm test            # node --test tests/*.test.ts (Node >= 22.19)
-npm run typecheck   # tsc --noEmit
-npm run build       # tsc -p tsconfig.build.json -> lib/
-npm run check       # scan this checkout (runs the built lib/cli.js)
+bun install --frozen-lockfile
+bun test            # tests/*.test.ts
+bun run typecheck   # tsc -p tsconfig.json (no emit)
+bun run build       # tsc -p tsconfig.build.json -> lib/
+bun run check       # scan this checkout (runs the built lib/cli.js)
 ```
 
 Coverage: every checker tag against real fixtures, CLI flag parsing, help, and each non-zero exit, frontmatter block scalars and chomping, skill discovery tolerating a broken sibling, abort settling promptly, and a real Cordis composition that mounts the skill provider and disposes it.
