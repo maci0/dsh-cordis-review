@@ -64,6 +64,52 @@ interface SkillProviderOptions {
   readonly onWarn?: (message: string) => void
 }
 
+/** Pre-hyphenated invocation keys the harness refuses, with the key that replaced each. */
+const LEGACY_INVOCATION_KEYS: Readonly<Record<string, string>> = {
+  disableModelInvocation: 'disable-model-invocation',
+  modelInvocable: 'disable-model-invocation',
+  userInvocable: 'user-invocable',
+}
+
+/**
+ * Read one invocation flag with the spellings the harness filesystem provider
+ * accepts: a YAML boolean, `1`/`0`, or `true`/`yes`/`on`/`false`/`no`/`off`
+ * in any case.
+ * @param data - the frontmatter mapping.
+ * @param key - the invocation key.
+ * @returns the flag, or `undefined` when the key is absent.
+ * @throws TypeError when the value is none of those spellings.
+ */
+function frontmatterBoolean(data: Readonly<Record<string, unknown>>, key: string): boolean | undefined {
+  if (!Object.hasOwn(data, key)) return undefined
+  const value = data[key]
+  if (typeof value === 'boolean') return value
+  if (value === 1 || value === '1') return true
+  if (value === 0 || value === '0') return false
+  if (typeof value === 'string') {
+    const word = value.toLowerCase()
+    if (word === 'true' || word === 'yes' || word === 'on') return true
+    if (word === 'false' || word === 'no' || word === 'off') return false
+  }
+  throw new TypeError(`frontmatter field "${key}" must be a boolean`)
+}
+
+/**
+ * Resolve the invocation policy the way the harness filesystem provider does.
+ * @param data - the frontmatter mapping.
+ * @returns the policy; both surfaces default to on.
+ * @throws Error for a legacy camelCase key or a non-boolean value.
+ */
+function parseInvocationPolicy(data: Readonly<Record<string, unknown>>): SkillInvocationPolicy {
+  for (const [legacy, canonical] of Object.entries(LEGACY_INVOCATION_KEYS)) {
+    if (Object.hasOwn(data, legacy)) throw new Error(`frontmatter field "${legacy}" is unsupported; use "${canonical}"`)
+  }
+  return {
+    modelInvocable: frontmatterBoolean(data, 'disable-model-invocation') !== true,
+    userInvocable: frontmatterBoolean(data, 'user-invocable') !== false,
+  }
+}
+
 /**
  * Read and parse one skill file. Shared by discovery and direct loads so a
  * single file enforces the name/description/frontmatter rules everywhere.
@@ -84,7 +130,8 @@ async function readSkillFile(
   let source: string
   try {
     source = await readFile(path, { encoding: 'utf8', signal })
-  } catch {
+  } catch (error) {
+    if (!signal?.aborted) onWarn?.(`cannot read ${path}: ${error instanceof Error ? error.message : String(error)}`)
     return undefined
   }
 
@@ -111,6 +158,14 @@ async function readSkillFile(
     return undefined
   }
 
+  let invocation: SkillInvocationPolicy
+  try {
+    invocation = parseInvocationPolicy(parsed.data)
+  } catch (error) {
+    onWarn?.(`skipping ${path}: ${error instanceof Error ? error.message : String(error)}`)
+    return undefined
+  }
+
   const metadata: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(parsed.data)) {
     if (SUMMARY_KEYS.has(key)) continue
@@ -123,10 +178,7 @@ async function readSkillFile(
     name,
     description,
     ...whenToUse === '' ? {} : { whenToUse },
-    invocation: {
-      modelInvocable: parsed.data['disable-model-invocation'] !== true,
-      userInvocable: parsed.data['user-invocable'] !== false,
-    },
+    invocation,
     content: parsed.body.trim(),
     metadata,
     path,
@@ -138,9 +190,9 @@ async function readSkillFile(
  * Read every valid skill directory under `skillsDir`.
  *
  * A missing directory, a directory without `SKILL.md`, a file whose frontmatter
- * the reader refuses, and a file with a missing description are reported
- * through `onWarn` and skipped: one broken file must not cost the catalog its
- * other skills.
+ * the reader refuses, and a file with a missing description or an invalid
+ * invocation key are reported through `onWarn` and skipped: one broken file
+ * must not cost the catalog its other skills.
  * @param skillsDir - directory holding one subdirectory per skill.
  * @param onWarn - optional non-fatal problem sink.
  * @param signal - aborts discovery for a caller that no longer wants the result.

@@ -171,6 +171,60 @@ test('frontmatter invocation controls project into the policy booleans', async (
   }
 })
 
+test('invocation keys accept the harness boolean spellings and skip anything else', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-cordis-review-'))
+  const skill = async (name: string, field: string): Promise<void> => {
+    await mkdir(join(dir, name))
+    await writeFile(join(dir, name, 'SKILL.md'), `---\nname: ${name}\ndescription: d\n${field}\n---\nbody\n`)
+  }
+  try {
+    await skill('hidden-no', 'user-invocable: no')
+    await skill('hidden-off', 'user-invocable: "off"')
+    await skill('hidden-zero', 'user-invocable: 0')
+    await skill('manual-yes', 'disable-model-invocation: yes')
+    await skill('manual-on', 'disable-model-invocation: ON')
+    await skill('manual-one', 'disable-model-invocation: "1"')
+    await skill('bad-value', 'user-invocable: maybe')
+    await skill('bad-null', 'disable-model-invocation: null')
+    await skill('legacy-camel', 'userInvocable: false')
+    const warnings: string[] = []
+    const listed = await createSkillProvider({ skillsDir: dir, onWarn: (message) => warnings.push(message) }).list()
+    const policy = Object.fromEntries(listed.map((entry) => [entry.name, entry.invocation]))
+    const hidden = { modelInvocable: true, userInvocable: false }
+    const manual = { modelInvocable: false, userInvocable: true }
+    assert.deepEqual(policy, {
+      'hidden-no': hidden,
+      'hidden-off': hidden,
+      'hidden-zero': hidden,
+      'manual-on': manual,
+      'manual-one': manual,
+      'manual-yes': manual,
+    })
+    assert.equal(warnings.length, 3)
+    assert.ok(warnings.some((message) => /bad-value.*"user-invocable" must be a boolean/.test(message)))
+    assert.ok(warnings.some((message) => /bad-null.*"disable-model-invocation" must be a boolean/.test(message)))
+    assert.ok(warnings.some((message) => /legacy-camel.*"userInvocable" is unsupported; use "user-invocable"/.test(message)))
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('a skill directory without SKILL.md is reported and skipped', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-cordis-review-'))
+  try {
+    await mkdir(join(dir, 'empty'))
+    await mkdir(join(dir, 'good'))
+    await writeFile(join(dir, 'good', 'SKILL.md'), '---\ndescription: d\n---\nbody\n')
+    const warnings: string[] = []
+    const skills = await discoverSkills(dir, (message) => warnings.push(message))
+    assert.deepEqual(skills.map((skill) => skill.name), ['good'])
+    assert.equal(warnings.length, 1)
+    assert.match(warnings[0] ?? '', /^cannot read .*empty\/SKILL\.md: ENOENT/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('a skill that omits name loads under its directory name', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-cordis-review-'))
   try {
