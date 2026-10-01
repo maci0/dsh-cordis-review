@@ -17,21 +17,15 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        node: ['22', '24']
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node }}
-          cache: npm
-      - run: npm ci --no-audit --no-fund
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
       # The scan shells out to ast-grep; without it every file takes the
-      # LLM-fallback path and the scan assertions cannot pass.
-      - run: npm install -g @ast-grep/cli@0.44.1
+      # LLM-fallback path and the scan assertions cannot pass. --trust runs the
+      # postinstall that swaps the package's node-run shim for the native binary.
+      - run: bun install -g --trust @ast-grep/cli@0.44.1
       - run: ast-grep --version
-      - run: npm run typecheck --if-present
-      - run: npm run build --if-present
-      - run: npm test --if-present
+      - run: bun run --if-present typecheck
+      - run: bun run --if-present build
+      - run: bun test
