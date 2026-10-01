@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict'
+import { cp, mkdir, mkdtemp, rm, symlink } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { test } from 'node:test'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SkillProvider } from '@deepseek-ai/dsh-skill'
 import { apply, name } from '../src/index.ts'
 import type { createSkillProvider } from '../src/skills.ts'
+import { scratch } from './scratch.ts'
 
 /** The provider `apply` registers, at the concrete type this package builds. */
 type Provider = ReturnType<typeof createSkillProvider>
@@ -93,4 +97,36 @@ test('dispose of inject removes the skills provider', () => {
   assert.equal(captured.providers.length, 1)
   captured.dispose()
   assert.equal(captured.providers.length, 0)
+})
+
+test('a skill discovery warning reaches the host logger, not the console', async () => {
+  const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
+  const pkg = await mkdtemp(join(scratch, 'cordis-review-pkg-'))
+  const original = console.warn
+  const consoleLines: string[] = []
+  console.warn = (...args: unknown[]) => { consoleLines.push(args.join(' ')) }
+  try {
+    await cp(join(packageRoot, 'src'), join(pkg, 'src'), { recursive: true })
+    await cp(join(packageRoot, 'skills'), join(pkg, 'skills'), { recursive: true })
+    await mkdir(join(pkg, 'skills', 'broken'))
+    await symlink(join(packageRoot, 'node_modules'), join(pkg, 'node_modules'), 'dir')
+    const copy = await import(pathToFileURL(join(pkg, 'src', 'index.ts')).href) as typeof import('../src/index.ts')
+
+    const logged: string[] = []
+    let provider: SkillProvider | undefined
+    const scope = {
+      logger: { warn: (message: string) => { logged.push(message) } },
+      skills: { registerProvider: (create: () => SkillProvider) => { provider = create(); return () => {} } },
+    }
+    copy.apply({ inject: (_: readonly string[], callback: (inner: unknown) => void) => callback(scope) } as unknown as Context)
+    assert.ok(provider)
+    await provider.list({})
+
+    assert.equal(logged.length, 1)
+    assert.match(logged[0] ?? '', /^\[cordis-review\] cannot read .*broken\/SKILL\.md/)
+    assert.deepEqual(consoleLines, [])
+  } finally {
+    console.warn = original
+    await rm(pkg, { recursive: true, force: true })
+  }
 })
