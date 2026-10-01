@@ -298,15 +298,15 @@ function warn(message: string): void {
 }
 
 /** LLM-fallback handoff: the review agent judges the file against the checklist. */
-function fallback(rel: string, ext: string): Finding {
-  warn(`${rel}: no ast-grep verdict for ${ext}. LLM fallback: judge this file against the CORDIS checklist yourself.`)
+function fallback(rel: string): Finding {
+  warn(`${rel}: no ast-grep verdict. LLM fallback: judge this file against the CORDIS checklist yourself.`)
   return {
     tag: 'inject',
     file: rel,
     line: 1,
     message:
-      `ast-grep covers no ${ext} grammar here (LLM fallback): judge this file against the CORDIS checklist yourself — ` +
-      `ctx.* service reads need inject, module-load effects belong in apply(ctx).`,
+      'ast-grep is not on PATH (LLM fallback): judge this file against the CORDIS checklist yourself. ' +
+      'ctx.* service reads need inject, module-load effects belong in apply(ctx).',
   }
 }
 
@@ -349,7 +349,7 @@ export async function check(root: string): Promise<readonly Finding[]> {
     const rel = relative(root, abs).split('\\').join('/')
     const ext = extname(abs).toLowerCase()
     if (raw === undefined) {
-      findings.push(fallback(rel, ext))
+      findings.push(fallback(rel))
       continue
     }
     const byRule = indexHits(byFile.get(abs) ?? [])

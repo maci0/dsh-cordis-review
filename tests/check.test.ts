@@ -282,7 +282,11 @@ test('engine missing: covered file warns and takes the LLM fallback', async () =
         const hits = await check(root)
         assert.equal(hits.length, 1)
         assert.equal(hits[0]?.tag, 'inject')
-        assert.match(hits[0]?.message ?? '', /LLM fallback/)
+        assert.equal(
+          hits[0]?.message,
+          'ast-grep is not on PATH (LLM fallback): judge this file against the CORDIS checklist yourself. '
+            + 'ctx.* service reads need inject, module-load effects belong in apply(ctx).',
+        )
         assert.ok(warnings.some((w) => w.includes('warning')))
       } finally {
         process.stderr.write = err
