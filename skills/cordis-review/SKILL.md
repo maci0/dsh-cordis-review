@@ -57,6 +57,7 @@ names (`ctx.effect`, `inject`, `ctx.get`, `apply`).
    node lib/cli.js [scope]
    ```
 
+   `bun lib/cli.js [scope]` runs the same file where `node` is not on PATH.
    The package root is the parent of `skills/cordis-review/` (this skill's
    directory). It prints `file:line: tag: message` for `mix-export`, `inject`,
    `toplevel`, and `id` (every tag is one ast-grep query) over JS/TS/TSX,
