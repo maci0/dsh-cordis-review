@@ -323,12 +323,27 @@ test('toplevel: braces in strings and comments do not corrupt depth', async () =
   await withTree(
     {
       'src/a.py': 's = "{"\nctx.effect()\n',
+      'src/c.py': 'x = 1  # {\nctx.effect()\n',
       'src/b.ts': 'export function apply(ctx) {\n  ctx.tools.register(() => {})\n}\n// }\nctx.effect(() => () => {})\n',
     },
     async (root) => {
       const hits = await check(root)
       const tops = hits.filter((h) => h.tag === 'toplevel').map((h) => `${h.file}:${h.line}`)
-      assert.deepEqual(tops, ['src/a.py:2', 'src/b.ts:5'])
+      assert.deepEqual(tops, ['src/a.py:2', 'src/b.ts:5', 'src/c.py:2'])
+    },
+  )
+})
+
+test('toplevel: a JS private member is code, not a comment', async () => {
+  await withTree(
+    {
+      'src/a.ts': "class Cache { #items = new Map() }\nctx.on('ready', () => {})\n",
+      'src/b.js': "class Cache { #items = new Map() }\nctx.on('ready', () => {})\n",
+    },
+    async (root) => {
+      const hits = await check(root)
+      const tops = hits.filter((h) => h.tag === 'toplevel').map((h) => `${h.file}:${h.line}`)
+      assert.deepEqual(tops, ['src/a.ts:2', 'src/b.js:2'])
     },
   )
 })
