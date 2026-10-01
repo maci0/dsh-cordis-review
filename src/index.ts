@@ -24,11 +24,10 @@ export const name = 'cordis-review'
  */
 export function apply(ctx: Context): void {
   const skillsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'skills')
-  const warn = (message: string): void => {
-    console.warn(`[cordis-review] ${message}`)
-  }
-
   ctx.inject(['skills'], (scope) => {
+    const warn = (message: string): void => {
+      scope.logger.warn(`[cordis-review] ${message}`)
+    }
     scope.skills.registerProvider(() => createSkillProvider({ skillsDir, onWarn: warn }))
   })
 }
