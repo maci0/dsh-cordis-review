@@ -1,9 +1,9 @@
 /**
  * Regression table: the flat reader may only claim a frontmatter block whose
  * value is provably what `yaml` produces. Each case pins one divergence an
- * adversarial verifier found in the earlier fast path — a CRLF block that threw
+ * adversarial verifier found in the earlier fast path (a CRLF block that threw
  * and got the whole skill silently skipped, `+` keep chomping, duplicate keys,
- * typed plain scalars, `a: b`, quoted/flow/`__proto__` keys — with the real
+ * typed plain scalars, `a: b`, quoted/flow/`__proto__` keys) with the real
  * `yaml` parser as the oracle for data and body.
  */
 import assert from 'node:assert/strict'

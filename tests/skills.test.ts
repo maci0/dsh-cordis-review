@@ -134,7 +134,7 @@ test('cordis-review carries its own rubric and names the one fetchable URL', asy
     skill.content.indexOf('## Protocol'),
     skill.content.indexOf('## What the paper requires'),
   )
-  // If a URL is offered, it must be the abs page — /pdf is rejected by the
+  // If a URL is offered, it must be the abs page: /pdf is rejected by the
   // harness and /html 404s for this submission.
   assert.match(protocol, /https:\/\/arxiv\.org\/abs\/2608\.25512/)
   assert.doesNotMatch(protocol, /arxiv\.org\/(pdf|html)\//)
