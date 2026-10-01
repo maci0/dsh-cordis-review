@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { spawnSync } from 'node:child_process'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { dirname } from 'node:path'
@@ -42,6 +42,28 @@ test('cli rejects a second positional as an extra argument', async () => {
     const result = run(dir, dir)
     assert.notEqual(result.status, 0)
     assert.match(result.stderr, /unexpected extra argument/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('cli reports a failing ast-grep scan with its own stderr, exit 2', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-cordis-review-cli-'))
+  try {
+    const bin = join(dir, 'bin')
+    await mkdir(bin)
+    await writeFile(
+      join(bin, 'ast-grep'),
+      '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "ast-grep 0.0.0"; exit 0; fi\necho "rule parse error" >&2\nexit 3\n',
+      { mode: 0o755 },
+    )
+    await writeFile(join(dir, 'index.ts'), 'export const x = 1\n')
+    const result = spawnSync(process.execPath, [cli, dir], {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${bin}:${process.env['PATH'] ?? ''}` },
+    })
+    assert.equal(result.status, 2)
+    assert.equal(result.stderr, 'cordis-check: ast-grep scan exited 3: rule parse error\n')
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

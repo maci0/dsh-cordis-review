@@ -297,10 +297,6 @@ function warn(message: string): void {
   process.stderr.write(`cordis-check: warning: ${message}\n`)
 }
 
-function sgOrThrow(rel: string): never {
-  throw new Error(`ast-grep failed on ${rel}: fix the binary or rerun without { astGrep: true }.`)
-}
-
 /** LLM-fallback handoff: the review agent judges the file against the checklist. */
 function fallback(rel: string, ext: string): Finding {
   warn(`${rel}: no ast-grep verdict for ${ext}. LLM fallback: judge this file against the CORDIS checklist yourself.`)
@@ -336,13 +332,9 @@ export async function check(root: string): Promise<readonly Finding[]> {
     covered.push(abs)
   }
 
-  // Single scan spawn for the whole tree; per-file grouping below is just
-  // bucketing matches by their `file` field, not more engine calls.
+  // One scan spawn per language and batch (see sgScanAll); per-file grouping
+  // below is just bucketing matches by their `file` field.
   const raw = detected ? sgScanAll(covered) : undefined
-  if (raw === undefined && detected) {
-    const first = covered.length > 0 ? relative(root, covered[0] ?? '').split('\\').join('/') : root
-    sgOrThrow(first)
-  }
   const byFile = new Map<string, SgHit[]>()
   for (const hit of raw ?? []) {
     const abs = hit.file ?? ''
@@ -441,8 +433,8 @@ const MAX_OUTPUT = 32 * 1024 * 1024
  */
 const MAX_PATHS = 200
 
-/** `ast-grep scan` spawns over every covered file: hits, [] on no match, undefined on engine failure. */
-function sgScanAll(files: readonly string[]): SgHit[] | undefined {
+/** `ast-grep scan` spawns over every covered file: hits, [] on no match. Throws on engine failure. */
+function sgScanAll(files: readonly string[]): SgHit[] {
   if (files.length === 0) return []
   // Group by language *before* chunking. The engine evaluates every rule in
   // the doc against every file, so one multi-language doc costs per-file eval
@@ -463,29 +455,34 @@ function sgScanAll(files: readonly string[]): SgHit[] | undefined {
     const doc = SG_DOC[lang]
     if (doc === undefined) continue
     for (let index = 0; index < langFiles.length; index += MAX_PATHS) {
-      const batch = sgScanBatch(doc, langFiles.slice(index, index + MAX_PATHS))
-      if (batch === undefined) return undefined
-      out.push(...batch)
+      out.push(...sgScanBatch(doc, langFiles.slice(index, index + MAX_PATHS)))
     }
   }
   return out
 }
 
-/** One bounded `ast-grep scan` spawn. */
-function sgScanBatch(doc: string, files: readonly string[]): SgHit[] | undefined {
+/** One bounded `ast-grep scan` spawn. Throws an `Error` naming the engine failure. */
+function sgScanBatch(doc: string, files: readonly string[]): SgHit[] {
   const result = spawnSync('ast-grep', ['scan', '--inline-rules', doc, '--json=compact', ...files], {
     encoding: 'utf8',
     maxBuffer: MAX_OUTPUT,
   })
-  if (result.status !== 0) return undefined
+  if (result.error !== undefined) throw new Error(`ast-grep scan failed: ${result.error.message}`)
+  if (result.status !== 0) {
+    const how = result.status === null ? `killed by ${result.signal ?? 'a signal'}` : `exited ${result.status}`
+    const reason = result.stderr.trim().split('\n')[0] ?? ''
+    throw new Error(`ast-grep scan ${how}${reason === '' ? '' : `: ${reason}`}`)
+  }
   const stdout = result.stdout.trim()
   if (stdout === '') return []
+  let parsed: unknown
   try {
-    const parsed = JSON.parse(stdout) as unknown
-    return Array.isArray(parsed) ? (parsed as SgHit[]) : undefined
+    parsed = JSON.parse(stdout)
   } catch {
-    return undefined
+    // A SyntaxError leaves `parsed` undefined: the non-array error below covers it.
   }
+  if (!Array.isArray(parsed)) throw new Error('ast-grep scan printed no JSON array')
+  return parsed as SgHit[]
 }
 
 function meta(hit: SgHit, name: string): string {

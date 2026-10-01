@@ -18,7 +18,7 @@ const USAGE = `usage: cordis-review-check [options] [root]
 
 Print closed-form CORDIS findings for <root> (default: the current directory).
   -h, --help               print this message
-Exit status: 0 clean, 1 findings, 2 usage or path error.
+Exit status: 0 clean, 1 findings, 2 usage, path, or ast-grep error.
 `
 
 /** Print one error line and exit with the usage-error status. */
