@@ -7,4 +7,4 @@
 # dedupe ids, and a second row would register the plugin twice.
 - insert:
     - id: cordis-review
-      name: 'dsh-cordis-review'
+      name: '@maci0/dsh-cordis-review'

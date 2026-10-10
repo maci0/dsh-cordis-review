@@ -27,20 +27,22 @@ On DeepSeek Harness and `dsh-*` plugins the paper maps onto existing names: `ctx
 > row added with `--patch` is an overlay: it disappears at the next start.
 
 ```sh
-dsh plugin --profile web add github:maci0/dsh-cordis-review#v0.17.1
+dsh plugin --profile web add github:maci0/dsh-cordis-review#v0.17.2
 ```
 
-Pin a release tag: a bare `github:` spec floats on `main`. To upgrade, run the same command with the newer tag, then restart `dsh web` (bundle layers compose at boot).
+Pin a release tag: a bare `github:` spec floats on `main`. To upgrade, run the
+same command with the newer tag, then restart `dsh web` (bundle layers compose
+at boot).
 
 The package declares `dsh.bundle` and ships a built `lib/`, so `dsh plugin add` activates its layer. Do not also paste the `id: cordis-review` row into your profile's `cordis.patch.yml`: `insert` does not dedupe ids, so the plugin would mount twice.
 
 Uninstall with the **package name**:
 
 ```sh
-dsh plugin --profile web remove dsh-cordis-review
+dsh plugin --profile web remove @maci0/dsh-cordis-review
 ```
 
-`remove github:…` is `pnpm remove github:…`, and pnpm resolves the argument as a dependency key. It is not there, so the command fails with `ERR_PNPM_CANNOT_REMOVE_MISSING_DEPS` even though the plugin is installed.
+Use the package name without a version when removing it; pnpm resolves the argument as a dependency key.
 
 Skill-only install, without the plugin row (DSH already watches `~/.dsh/skills`):
 
