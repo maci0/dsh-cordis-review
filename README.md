@@ -27,12 +27,11 @@ On DeepSeek Harness and `dsh-*` plugins the paper maps onto existing names: `ctx
 > row added with `--patch` is an overlay: it disappears at the next start.
 
 ```sh
-dsh plugin --profile web add github:maci0/dsh-cordis-review#v0.17.3
+dsh plugin --profile web add --save-exact @maci0/dsh-cordis-review@0.18.0
 ```
 
-Pin a release tag: a bare `github:` spec floats on `main`. To upgrade, run the
-same command with the newer tag, then restart `dsh web` (bundle layers compose
-at boot).
+Pin an exact npm version. To upgrade, run the same command with the newer
+version, then restart `dsh web` (bundle layers compose at boot).
 
 The package declares `dsh.bundle` and ships a built `lib/`, so `dsh plugin add` activates its layer. Do not also paste the `id: cordis-review` row into your profile's `cordis.patch.yml`: `insert` does not dedupe ids, so the plugin would mount twice.
 
